@@ -69,6 +69,17 @@ other pillars depend on.
   because SoA keeps the hot batching-iteration loop cache-line-friendly, which matters here
   specifically because the app targets many parallel in-flight requests across multiple engine
   types at once).
+
+  The llama.cpp bindings (`crates/engine-host/src/llama.rs`) are generated at build time by
+  `bindgen` in its dynamic-library mode, from headers vendored under
+  `crates/engine-host/vendor/llama-cpp/` — this produces a `libloading`-backed struct with the
+  correct C struct layouts (rather than hand-transcribing them, which risks a subtly wrong
+  field size or ordering causing memory corruption) while still loading the actual engine
+  `.dll`/`.so` at runtime, not linking against it at compile time. llama.cpp's compute backends
+  (CPU, Vulkan, CUDA, ...) are themselves dynamically loaded plugins, discovered via
+  `ggml_backend_load_all_from_path` at engine-load time — a separate small dynamic-loading
+  binding, since that function lives in a different shared library (`ggml.dll`/`libggml.so`)
+  than the main engine library.
 - **Plugin Registry** (`crates/plugin-registry`) — fetches `registry/engines.json` (available
   engine plugin builds) and `registry/models.json` (curated Hugging Face model catalog) from
   this repo, kept as two separate files because they change at different cadences (engines
@@ -83,12 +94,15 @@ other pillars depend on.
   `registry/local.engines.json`/`registry/local.models.json`, merged in when present, is where
   a developer's own `file://` entries live — so no local filesystem paths ever reach the
   committed registry.
-- **`src-tauri/`** — the Tauri app shell. Streams batched inference output to the frontend via
-  Tauri's `Channel` raw-byte API rather than the standard JSON `invoke`/`emit` round trip,
-  because that's the actual hot path (token streaming, tool-call progress) — bypassing JSON
-  serialization there matters more than parsing it faster. Ordinary JSON IPC is used for
-  low-frequency control-plane calls (opening a conversation, listing models), where the extra
-  serialization cost is immaterial and debuggability matters more.
+- **`src-tauri/`** — the Tauri app shell. Streams inference output to the frontend via Tauri's
+  `Channel` API (currently JSON-serialized per event; switching the hot token-streaming path to
+  raw bytes to avoid that per-event serialization cost is a later optimization, not yet done).
+  Ordinary JSON IPC is used for low-frequency control-plane calls (opening a conversation,
+  listing models), where the extra serialization cost is immaterial and debuggability matters
+  more. Structured logging (`tracing`) writes human-readable output to the console and a
+  daily-rotated file under the OS-appropriate app data directory, so behavior — including
+  per-request timing and tokens/sec — can be inspected after the app window has closed, not
+  just while it's running.
 - **`ui/`** — React + TypeScript + Tailwind CSS frontend. Chosen over a native immediate-mode
   UI (e.g. Dear ImGui) because the actual inference bottleneck (matrix multiplication) is
   identical either way — it happens via FFI in `engine-host` regardless of UI framework — so a

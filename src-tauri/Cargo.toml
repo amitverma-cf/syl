@@ -31,4 +31,8 @@ tool.workspace = true
 executor.workspace = true
 daemon.workspace = true
 plugin-registry.workspace = true
+tracing.workspace = true
+tracing-subscriber.workspace = true
+tracing-appender.workspace = true
+directories = "5"
 
