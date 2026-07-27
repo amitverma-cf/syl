@@ -76,7 +76,13 @@ other pillars depend on.
   model-browsing UI). This is how new engines, hardware-specific builds, or recommended models
   reach users without an app release — a manifest commit instead of a new binary. The registry
   never hosts model weights itself, only metadata and a Hugging Face download URL + hash, to
-  keep the registry small and fast to update.
+  keep the registry small and fast to update. Each entry's download URL may be a `file://`
+  path (resolved directly, for local development) or an `http://`/`https://` URL (fetched and
+  cached once real hosting exists); `registry/engines.json` and `registry/models.json` hold
+  only the entries meant to ship to every user, while a machine-local, gitignored
+  `registry/local.engines.json`/`registry/local.models.json`, merged in when present, is where
+  a developer's own `file://` entries live — so no local filesystem paths ever reach the
+  committed registry.
 - **`src-tauri/`** — the Tauri app shell. Streams batched inference output to the frontend via
   Tauri's `Channel` raw-byte API rather than the standard JSON `invoke`/`emit` round trip,
   because that's the actual hot path (token streaming, tool-call progress) — bypassing JSON
