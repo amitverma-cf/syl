@@ -1,5 +1,7 @@
 //! Shared types and error kinds used across all five pillars.
 
+pub mod workspace_paths;
+
 use serde::{Deserialize, Serialize};
 
 /// An error returned by any of the pillar crates.

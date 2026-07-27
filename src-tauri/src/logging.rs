@@ -8,7 +8,7 @@ use tracing_subscriber::fmt::writer::MakeWriterExt;
 /// for the lifetime of the app — dropping it stops the background thread that flushes log
 /// lines to disk, silently truncating anything not yet written.
 pub fn init() -> WorkerGuard {
-    let log_dir = crate::app_paths::logs_dir();
+    let log_dir = core_types::workspace_paths::logs_dir();
     let file_appender = tracing_appender::rolling::daily(&log_dir, "syl.log");
     let (non_blocking, guard) = tracing_appender::non_blocking(file_appender);
 

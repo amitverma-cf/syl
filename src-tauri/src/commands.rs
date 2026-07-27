@@ -1,8 +1,8 @@
 //! Tauri commands exposed to the frontend.
 
-use std::path::PathBuf;
 use std::sync::Arc;
 
+use core_types::workspace_paths;
 use engine_host::llama::LlamaEngine;
 use memory::{ConversationStore, Message, SqliteConversationStore};
 use tauri::ipc::Channel;
@@ -71,25 +71,30 @@ fn run_generate(
         .append_message(conversation_id, "user", prompt)
         .map_err(|e| e.to_string())?;
 
-    let registry_dir = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../registry");
+    let registry_dir = workspace_paths::registry_dir();
 
     let engines = plugin_registry::load_engine_entries(&registry_dir).map_err(|e| e.to_string())?;
     let engine_entry = engines
         .iter()
         .find(|e| e.id == "llama-cpp")
-        .ok_or_else(|| "no llama-cpp entry in registry/local.engines.json".to_string())?;
+        .ok_or_else(|| "no llama-cpp entry in .syl/registry/engines.json".to_string())?;
     let library_path = plugin_registry::resolve_local_path(&engine_entry.download_url)
         .map_err(|e| e.to_string())?;
 
     let models = plugin_registry::load_model_entries(&registry_dir).map_err(|e| e.to_string())?;
     let model_entry = models
-        .first()
-        .ok_or_else(|| "no entries in registry/local.models.json".to_string())?;
+        .iter()
+        .find(|m| {
+            m.required_engine == "llama-cpp"
+                && !m.name.to_lowercase().contains("embed")
+                && !m.name.to_lowercase().contains("minilm")
+        })
+        .ok_or_else(|| "no chat model entry in .syl/registry/models.json".to_string())?;
     let model_path = plugin_registry::resolve_local_path(&model_entry.huggingface_url)
         .map_err(|e| e.to_string())?;
 
     let mut engine =
-        LlamaEngine::load(&library_path, &model_path, 2048).map_err(|e| e.to_string())?;
+        LlamaEngine::load(&library_path, &model_path, 2048, false).map_err(|e| e.to_string())?;
 
     let response = engine
         .generate(prompt, 128, |piece| {

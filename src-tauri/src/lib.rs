@@ -1,9 +1,10 @@
-mod app_paths;
+mod bootstrap;
 mod commands;
 mod logging;
 
 use std::sync::Arc;
 
+use core_types::workspace_paths;
 use memory::SqliteConversationStore;
 
 /// Shared app state available to every Tauri command.
@@ -15,7 +16,9 @@ pub struct AppState {
 pub fn run() {
     let _log_guard = logging::init();
 
-    let conversation_store = memory::open(&app_paths::conversation_db_path())
+    bootstrap::ensure_workspace_seeded();
+
+    let conversation_store = memory::open(&workspace_paths::conversation_db_path())
         .expect("failed to open conversation database");
 
     tauri::Builder::default()

@@ -80,7 +80,10 @@ other pillars depend on.
   (CPU, Vulkan, CUDA, ...) are themselves dynamically loaded plugins, discovered via
   `ggml_backend_load_all_from_path` at engine-load time — a separate small dynamic-loading
   binding, since that function lives in a different shared library (`ggml.dll`/`libggml.so`)
-  than the main engine library.
+  than the main engine library. `LlamaEngine` supports two load modes: text generation
+  (default) and embeddings (`embeddings: true`, mean-pooled via `LLAMA_POOLING_TYPE_MEAN`) —
+  the latter is how `crates/memory`'s eventual vector search gets the vectors it searches over,
+  using a small dedicated embedding model rather than the chat model.
 - **Plugin Registry** (`crates/plugin-registry`) — fetches `registry/engines.json` (available
   engine plugin builds) and `registry/models.json` (curated Hugging Face model catalog) from
   this repo, kept as two separate files because they change at different cadences (engines
@@ -113,16 +116,24 @@ other pillars depend on.
 
 ## Data layout
 
-- Per-user app data directory (`app_data_dir()` — `%APPDATA%\syl`, `~/Library/Application
-  Support/syl`, `~/.local/share/syl`): `db/` (SQLite store), `plugins/` (downloaded engine
-  binaries), `models/` (downloaded weights), `flows/` (global flow files), `registry-cache/`,
-  `config.json`.
-- **User-opened workspace folders** are a separate concept from app data — like an IDE, the
+- **Currently `~/.syl/`** (`core_types::workspace_paths`), used directly as a temporary,
+  concrete stand-in for the eventual OS-appropriate per-user app data directory
+  (`%APPDATA%\syl`, `~/Library/Application Support/syl`, `~/.local/share/syl`) — swapping in
+  the OS-idiomatic path later only touches `workspace_paths`, nothing that calls it. Layout:
+  `engines/<engine-id>/` (installed engine plugin binaries), `models/` (downloaded weights),
+  `memory/` (SQLite conversation store), `logs/` (daily-rotated log files), `registry/`
+  (`engines.json`/`models.json`, the single source of truth the app reads at runtime).
+- **`src-tauri/src/bootstrap.rs`** seeds `.syl/` on first run: it resolves whatever the
+  repo-relative dev `registry/` (including local dev overrides) currently points at, copies
+  those files into `.syl/engines/`/`.syl/models/`, and writes fresh `.syl/registry/*.json`
+  entries pointing at the copies — so after the first run, `.syl/` is fully self-contained and
+  no longer depends on wherever the source files originally came from. A no-op once
+  `.syl/registry/engines.json` already exists.
+- **User-opened workspace folders** are a separate concept from `.syl/` — like an IDE, the
   Tool pillar's filesystem/terminal access is scoped to a folder the user explicitly opens, not
-  to the app data directory. Models/plugins are shared, expensive-to-fetch resources that
-  shouldn't be duplicated per workspace or lost if a workspace folder is deleted or moved,
-  which is why they live in the app data directory rather than inside whatever folder happens
-  to be open.
+  to `.syl/`. Models/engines are shared, expensive-to-fetch resources that shouldn't be
+  duplicated per workspace or lost if a workspace folder is deleted or moved, which is why they
+  live in `.syl/` rather than inside whatever folder happens to be open.
 
 ## Distribution
 

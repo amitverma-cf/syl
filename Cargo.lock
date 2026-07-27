@@ -596,6 +596,7 @@ dependencies = [
 name = "core-types"
 version = "0.1.0"
 dependencies = [
+ "directories",
  "serde",
  "thiserror 1.0.69",
 ]

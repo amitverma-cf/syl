@@ -32,7 +32,7 @@ fn main() {
     println!("model:  {}", model_path.display());
 
     let mut engine =
-        LlamaEngine::load(&library_path, &model_path, 2048).expect("failed to load engine");
+        LlamaEngine::load(&library_path, &model_path, 2048, false).expect("failed to load engine");
 
     println!("--- generating ---");
     let full = engine

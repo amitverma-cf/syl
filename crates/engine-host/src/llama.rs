@@ -25,6 +25,9 @@ pub enum LlamaError {
     /// A decode step failed.
     #[error("llama_decode failed with code {0}")]
     Decode(i32),
+    /// The context did not return an embedding after a decode step.
+    #[error("no embedding was produced; was the engine loaded with embeddings enabled?")]
+    EmbeddingUnavailable,
 }
 
 /// A loaded llama.cpp model and inference context, ready to generate text for one sequence
@@ -41,7 +44,9 @@ unsafe impl Send for LlamaEngine {}
 
 impl LlamaEngine {
     /// Loads the llama.cpp shared library at `library_path` and the model at `model_path`,
-    /// creating an inference context sized to `n_ctx` tokens.
+    /// creating an inference context sized to `n_ctx` tokens. If `embeddings` is `true`, the
+    /// context is configured to produce mean-pooled sequence embeddings (via [`Self::embed`])
+    /// instead of being used for text generation.
     ///
     /// # Errors
     /// Returns an error if the library or model fails to load, or the context fails to create.
@@ -49,7 +54,12 @@ impl LlamaEngine {
         library = %library_path.display(),
         model = %model_path.display(),
     ))]
-    pub fn load(library_path: &Path, model_path: &Path, n_ctx: u32) -> Result<Self, LlamaError> {
+    pub fn load(
+        library_path: &Path,
+        model_path: &Path,
+        n_ctx: u32,
+        embeddings: bool,
+    ) -> Result<Self, LlamaError> {
         let load_start = std::time::Instant::now();
 
         // SAFETY: `library_path` is expected to point at a llama.cpp build implementing the
@@ -77,6 +87,10 @@ impl LlamaEngine {
 
         let mut ctx_params = unsafe { lib.llama_context_default_params() };
         ctx_params.n_ctx = n_ctx;
+        if embeddings {
+            ctx_params.embeddings = true;
+            ctx_params.pooling_type = crate::bindings::llama_pooling_type_LLAMA_POOLING_TYPE_MEAN;
+        }
 
         let ctx = unsafe { lib.llama_init_from_model(model, ctx_params) };
         if ctx.is_null() {
@@ -160,6 +174,45 @@ impl LlamaEngine {
             "generation finished"
         );
         Ok(output)
+    }
+
+    /// Computes a mean-pooled embedding vector for `text`. The engine must have been loaded
+    /// with `embeddings: true` (see [`Self::load`]).
+    ///
+    /// # Errors
+    /// Returns an error if `text` cannot be tokenized, the decode step fails, or no embedding
+    /// is produced (most commonly because the engine wasn't loaded with embeddings enabled).
+    #[tracing::instrument(skip(self, text), fields(text_len = text.len()))]
+    pub fn embed(&mut self, text: &str) -> Result<Vec<f32>, LlamaError> {
+        let embed_start = std::time::Instant::now();
+        let vocab = unsafe { self.lib.llama_model_get_vocab(self.model) };
+        let mut tokens = self.tokenize(vocab, text, true)?;
+
+        let batch = unsafe {
+            self.lib
+                .llama_batch_get_one(tokens.as_mut_ptr(), tokens.len() as i32)
+        };
+        let rc = unsafe { self.lib.llama_decode(self.ctx, batch) };
+        if rc != 0 {
+            tracing::error!(code = rc, "decode step failed");
+            return Err(LlamaError::Decode(rc));
+        }
+
+        let n_embd = unsafe { self.lib.llama_model_n_embd(self.model) };
+        let ptr = unsafe { self.lib.llama_get_embeddings_seq(self.ctx, 0) };
+        if ptr.is_null() || n_embd <= 0 {
+            return Err(LlamaError::EmbeddingUnavailable);
+        }
+
+        // SAFETY: llama.cpp guarantees `ptr` points to `n_embd` valid `f32`s when non-null.
+        let embedding = unsafe { std::slice::from_raw_parts(ptr, n_embd as usize) }.to_vec();
+
+        tracing::info!(
+            dims = embedding.len(),
+            elapsed_ms = embed_start.elapsed().as_millis(),
+            "embedding computed"
+        );
+        Ok(embedding)
     }
 
     fn tokenize(
