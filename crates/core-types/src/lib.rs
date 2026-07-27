@@ -2,12 +2,15 @@
 
 use serde::{Deserialize, Serialize};
 
+/// An error returned by any of the pillar crates.
 #[derive(Debug, thiserror::Error)]
 pub enum CoreError {
+    /// The called functionality has not been implemented yet.
     #[error("not implemented")]
     NotImplemented,
 }
 
+/// The result type returned by fallible operations across the pillar crates.
 pub type CoreResult<T> = Result<T, CoreError>;
 
 /// Identifies a loaded or loadable model instance, scoped to an engine.

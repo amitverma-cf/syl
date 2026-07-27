@@ -1,27 +1,28 @@
-//! Provider pillar: abstracts "a thing that can run inference" — local engines
-//! (via engine-host FFI) and cloud APIs (HTTP) — behind a single trait, backed
-//! by a multi-model registry rather than a single global instance.
+//! Traits and types for running inference against local engines or cloud APIs.
 
 use core_types::{CoreResult, EngineId, ModelId};
 
-/// A model available for inference, whether local (engine-backed) or remote (cloud API).
+/// A single model available for inference, whether backed by a local engine or a remote API.
 pub trait Provider: Send + Sync {
+    /// Returns the id of the engine this model runs on.
     fn engine_id(&self) -> &EngineId;
+    /// Returns the id of this model.
     fn model_id(&self) -> &ModelId;
 }
 
-/// Tracks all loaded/available models across all engines. Explicitly multi-model:
-/// agent.cpp's single-hardcoded-instance design is the mistake this replaces.
+/// Tracks every model currently loaded or available across all engines.
 #[derive(Default)]
 pub struct ModelRegistry {
     // populated once Provider implementations exist
 }
 
 impl ModelRegistry {
+    /// Creates an empty registry.
     pub fn new() -> Self {
         Self::default()
     }
 
+    /// Returns the ids of all models currently registered.
     pub fn list(&self) -> CoreResult<Vec<ModelId>> {
         Ok(Vec::new())
     }

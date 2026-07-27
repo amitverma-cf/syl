@@ -1,8 +1,12 @@
-//! Memory pillar: durable conversation/state store (SQLite + sqlite-vec, Decision #11)
-//! plus context compression. Skeleton only — storage backend wired in a later pass.
+//! Durable storage for conversations and agent state.
 
 use core_types::CoreResult;
 
+/// Persists conversation messages.
 pub trait ConversationStore: Send + Sync {
+    /// Appends a message to the given conversation.
+    ///
+    /// # Errors
+    /// Returns an error if the message could not be persisted.
     fn append_message(&self, conversation_id: &str, role: &str, content: &str) -> CoreResult<()>;
 }
