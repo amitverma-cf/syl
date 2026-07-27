@@ -38,3 +38,5 @@ libloading = "0.8"
 tracing = "0.1"
 tracing-subscriber = "0.3"
 tracing-appender = "0.2"
+rusqlite = { version = "0.31", features = ["bundled"] }
+directories = "5"

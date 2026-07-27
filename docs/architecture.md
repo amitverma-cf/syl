@@ -15,10 +15,11 @@ other pillars depend on.
    many models, across many engines, can be loaded and addressed simultaneously, rather than
    one global model instance. A single hardcoded model made it structurally hard to support
    multiple concurrent models or roles, so the registry design is multi-model from the start.
-2. **Memory** (`crates/memory`) — the durable conversation/state store (SQLite + `sqlite-vec`)
-   and context compression. SQLite is a single file: zero ops, trivial backup, and vector
-   search via `sqlite-vec` is more than sufficient for one user's conversation history — a
-   dedicated vector database would be scale-appropriate for a multi-tenant service, not this.
+2. **Memory** (`crates/memory`) — the durable conversation store, currently a `ConversationStore`
+   trait backed by SQLite (via `rusqlite`, bundled). SQLite is a single file: zero ops, trivial
+   backup. Vector search (`sqlite-vec`) and context compression are planned for when embeddings
+   and long conversations actually exist — not wired in yet, since nothing currently produces
+   embeddings to search over.
 3. **Tool** (`crates/tool`) — async-first tool execution, gated by permission tiers
    (Allow/Ask/Deny), with sandboxed filesystem/terminal tools as first-class citizens and an
    MCP-client escape hatch for anything not natively supported. Async is foundational, not
