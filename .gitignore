@@ -1,0 +1,7 @@
+/target
+/ui/node_modules
+/ui/dist
+/src-tauri/target
+
+# Active docs: local, per-branch planning/tasks. Never pushed — see docs/README.md.
+/docs/active/

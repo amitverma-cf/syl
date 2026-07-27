@@ -1,0 +1,37 @@
+[workspace]
+resolver = "2"
+members = [
+    "crates/core-types",
+    "crates/provider",
+    "crates/engine-host",
+    "crates/memory",
+    "crates/tool",
+    "crates/executor",
+    "crates/daemon",
+    "crates/plugin-registry",
+    "src-tauri",
+]
+
+[workspace.package]
+version = "0.1.0"
+edition = "2021"
+license = "MIT"
+repository = "https://github.com/amve/syl"
+
+[workspace.dependencies]
+core-types = { path = "crates/core-types" }
+provider = { path = "crates/provider" }
+engine-host = { path = "crates/engine-host" }
+memory = { path = "crates/memory" }
+tool = { path = "crates/tool" }
+executor = { path = "crates/executor" }
+daemon = { path = "crates/daemon" }
+plugin-registry = { path = "crates/plugin-registry" }
+
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+simd-json = "0.13"
+rkyv = "0.7"
+tokio = { version = "1", features = ["rt-multi-thread", "macros", "time", "sync"] }
+thiserror = "1"
+libloading = "0.8"
