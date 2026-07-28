@@ -9,9 +9,13 @@ core-types.workspace = true
 libloading.workspace = true
 thiserror.workspace = true
 tracing.workspace = true
+tokio.workspace = true
+serde_json.workspace = true
+tool.workspace = true
 
 [build-dependencies]
 bindgen = "0.70"
 
 [dev-dependencies]
 plugin-registry.workspace = true
+memory.workspace = true

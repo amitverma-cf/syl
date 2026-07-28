@@ -1236,8 +1236,12 @@ dependencies = [
  "bindgen",
  "core-types",
  "libloading 0.8.9",
+ "memory",
  "plugin-registry",
+ "serde_json",
  "thiserror 1.0.69",
+ "tokio",
+ "tool",
  "tracing",
 ]
 
@@ -3495,10 +3499,12 @@ dependencies = [
  "core-types",
  "futures-util",
  "genai",
+ "memory",
  "serde",
  "serde_json",
  "thiserror 1.0.69",
  "tokio",
+ "tool",
  "tracing",
  "ureq",
 ]

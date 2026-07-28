@@ -1,6 +1,7 @@
 pub mod batching;
 pub mod llama;
 pub mod plugin;
+pub mod tool_loop;
 pub mod watchdog;
 
 #[allow(
