@@ -29,3 +29,5 @@ plugin-registry.workspace = true
 tracing.workspace = true
 tracing-subscriber.workspace = true
 tracing-appender.workspace = true
+tokio.workspace = true
+async-trait = "0.1"

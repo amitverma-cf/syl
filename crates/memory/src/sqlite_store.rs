@@ -3,7 +3,10 @@ use std::sync::Mutex;
 
 use rusqlite::Connection;
 
-use crate::{ConversationStore, EmbeddingMatch, EmbeddingStore, MemoryError, Message};
+use crate::{
+    ConversationStore, EmbeddingMatch, EmbeddingStore, MemoryError, Message,
+    ToolPermissionDecision, ToolPermissionStore,
+};
 
 pub struct SqliteConversationStore {
     conn: Mutex<Connection>,
@@ -28,6 +31,12 @@ const SCHEMA: &str = "
     );
     CREATE INDEX IF NOT EXISTS idx_embeddings_conversation
         ON embeddings (conversation_id);
+    CREATE TABLE IF NOT EXISTS tool_permissions (
+        conversation_id TEXT NOT NULL,
+        tool_name       TEXT NOT NULL,
+        decision        TEXT NOT NULL,
+        PRIMARY KEY (conversation_id, tool_name)
+    );
 ";
 
 impl SqliteConversationStore {
@@ -151,6 +160,55 @@ impl EmbeddingStore for SqliteConversationStore {
         scored.sort_by(|a, b| b.score.total_cmp(&a.score));
         scored.truncate(top_k);
         Ok(scored)
+    }
+}
+
+impl ToolPermissionStore for SqliteConversationStore {
+    fn get_tool_permission(
+        &self,
+        conversation_id: &str,
+        tool_name: &str,
+    ) -> Result<Option<ToolPermissionDecision>, MemoryError> {
+        let conn = self
+            .conn
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
+        let decision: Option<String> = conn
+            .query_row(
+                "SELECT decision FROM tool_permissions
+                 WHERE conversation_id = ?1 AND tool_name = ?2",
+                (conversation_id, tool_name),
+                |row| row.get(0),
+            )
+            .ok();
+
+        Ok(decision.map(|d| match d.as_str() {
+            "allow" => ToolPermissionDecision::Allow,
+            _ => ToolPermissionDecision::Deny,
+        }))
+    }
+
+    fn set_tool_permission(
+        &self,
+        conversation_id: &str,
+        tool_name: &str,
+        decision: ToolPermissionDecision,
+    ) -> Result<(), MemoryError> {
+        let decision_str = match decision {
+            ToolPermissionDecision::Allow => "allow",
+            ToolPermissionDecision::Deny => "deny",
+        };
+        let conn = self
+            .conn
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
+        conn.execute(
+            "INSERT INTO tool_permissions (conversation_id, tool_name, decision)
+             VALUES (?1, ?2, ?3)
+             ON CONFLICT (conversation_id, tool_name) DO UPDATE SET decision = excluded.decision",
+            (conversation_id, tool_name, decision_str),
+        )?;
+        Ok(())
     }
 }
 

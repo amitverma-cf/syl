@@ -58,6 +58,27 @@ pub trait EmbeddingStore: Send + Sync {
     ) -> Result<Vec<EmbeddingMatch>, MemoryError>;
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+pub enum ToolPermissionDecision {
+    Allow,
+    Deny,
+}
+
+pub trait ToolPermissionStore: Send + Sync {
+    fn get_tool_permission(
+        &self,
+        conversation_id: &str,
+        tool_name: &str,
+    ) -> Result<Option<ToolPermissionDecision>, MemoryError>;
+
+    fn set_tool_permission(
+        &self,
+        conversation_id: &str,
+        tool_name: &str,
+        decision: ToolPermissionDecision,
+    ) -> Result<(), MemoryError>;
+}
+
 pub fn open(db_path: &Path) -> Result<SqliteConversationStore, MemoryError> {
     if let Some(parent) = db_path.parent() {
         std::fs::create_dir_all(parent).map_err(|source| MemoryError::CreateDir {
