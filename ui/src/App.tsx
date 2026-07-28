@@ -44,6 +44,18 @@ interface FlowStateInfo {
   systemPrompt: string;
 }
 
+interface ProviderInfo {
+  name: string;
+  envVar: string;
+  configured: boolean;
+}
+
+interface CloudModel {
+  id: string;
+  provider: string;
+  label: string;
+}
+
 const CONVERSATION_ID = "default";
 
 function formatBytes(bytes: number): string {
@@ -72,6 +84,13 @@ function App() {
 
   const [availableFlows, setAvailableFlows] = useState<string[]>([]);
   const [activeFlow, setActiveFlow] = useState<FlowStateInfo | null>(null);
+
+  const [providers, setProviders] = useState<ProviderInfo[]>([]);
+  const [cloudModels, setCloudModels] = useState<CloudModel[]>([]);
+  const [selectedModel, setSelectedModel] = useState<string>("");
+  const [showSettings, setShowSettings] = useState(false);
+  const [apiKeyDrafts, setApiKeyDrafts] = useState<Record<string, string>>({});
+  const [savingProvider, setSavingProvider] = useState<string | null>(null);
 
   useEffect(() => {
     invoke<StoredMessage[]>("list_messages", { conversationId: CONVERSATION_ID })
@@ -130,6 +149,35 @@ function App() {
     const interval = setInterval(poll, 5000);
     return () => clearInterval(interval);
   }, []);
+
+  function refreshProviders() {
+    invoke<ProviderInfo[]>("list_providers")
+      .then(setProviders)
+      .catch(() => {});
+  }
+
+  useEffect(() => {
+    refreshProviders();
+    invoke<CloudModel[]>("list_cloud_models")
+      .then(setCloudModels)
+      .catch(() => {});
+  }, []);
+
+  async function handleSaveApiKey(envVar: string) {
+    const key = apiKeyDrafts[envVar];
+    if (!key) return;
+    setSavingProvider(envVar);
+    setError(null);
+    try {
+      await invoke("set_provider_api_key", { envVar, key });
+      setApiKeyDrafts((prev) => ({ ...prev, [envVar]: "" }));
+      refreshProviders();
+    } catch (err) {
+      setError(String(err));
+    } finally {
+      setSavingProvider(null);
+    }
+  }
 
   async function handleDownloadModel(name: string) {
     setDownloadingModel(name);
@@ -218,6 +266,7 @@ function App() {
       await invoke("generate", {
         prompt: userPrompt,
         conversationId: CONVERSATION_ID,
+        model: selectedModel || null,
         onEvent: channel,
       });
     } catch (err) {
@@ -232,6 +281,12 @@ function App() {
     <main className="flex h-screen w-screen flex-col items-center gap-4 bg-neutral-950 p-8 text-neutral-100">
       <div className="flex w-full max-w-2xl items-center justify-between">
         <h1 className="text-2xl font-semibold">syl</h1>
+        <button
+          onClick={() => setShowSettings((prev) => !prev)}
+          className="text-xs text-neutral-400 underline"
+        >
+          Settings
+        </button>
         {stats && (
           <div className="flex gap-3 text-xs text-neutral-500">
             <span>CPU {stats.cpuUsagePercent.toFixed(0)}%</span>
@@ -243,6 +298,34 @@ function App() {
           </div>
         )}
       </div>
+
+      {showSettings && (
+        <div className="flex w-full max-w-2xl flex-col gap-2 rounded border border-neutral-800 bg-neutral-900 p-4">
+          <span className="text-sm font-medium">Cloud provider API keys</span>
+          {providers.map((p) => (
+            <div key={p.envVar} className="flex items-center gap-2">
+              <span className="w-24 shrink-0 text-sm">{p.name}</span>
+              <input
+                type="password"
+                value={apiKeyDrafts[p.envVar] ?? ""}
+                onChange={(e) =>
+                  setApiKeyDrafts((prev) => ({ ...prev, [p.envVar]: e.currentTarget.value }))
+                }
+                placeholder={p.configured ? "Key saved — enter to replace" : "API key"}
+                className="flex-1 rounded border border-neutral-700 bg-neutral-900 px-2 py-1 text-sm"
+              />
+              <button
+                onClick={() => handleSaveApiKey(p.envVar)}
+                disabled={savingProvider === p.envVar || !apiKeyDrafts[p.envVar]}
+                className="rounded bg-neutral-100 px-2 py-1 text-xs font-medium text-neutral-950 disabled:opacity-50"
+              >
+                Save
+              </button>
+              {p.configured && <span className="text-xs text-green-400">Configured</span>}
+            </div>
+          ))}
+        </div>
+      )}
 
       {permissionRequest && (
         <div className="w-full max-w-2xl rounded border border-amber-600 bg-amber-950/40 p-4">
@@ -302,6 +385,25 @@ function App() {
           </p>
         </div>
       )}
+
+      <div className="flex w-full max-w-2xl items-center gap-2">
+        <span className="text-xs text-neutral-500">Model</span>
+        <select
+          value={selectedModel}
+          onChange={(e) => setSelectedModel(e.currentTarget.value)}
+          className="rounded border border-neutral-700 bg-neutral-900 px-2 py-1 text-xs"
+        >
+          <option value="">Local (default)</option>
+          {cloudModels.map((m) => {
+            const configured = providers.find((p) => p.name === m.provider)?.configured ?? false;
+            return (
+              <option key={m.id} value={m.id} disabled={!configured}>
+                {m.label} ({m.provider}){configured ? "" : " — needs API key"}
+              </option>
+            );
+          })}
+        </select>
+      </div>
 
       <form onSubmit={handleSubmit} className="flex w-full max-w-2xl gap-2">
         <input

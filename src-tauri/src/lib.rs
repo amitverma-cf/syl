@@ -6,6 +6,7 @@ mod logging;
 mod models;
 mod observability;
 mod permission;
+mod providers;
 
 use std::sync::Arc;
 
@@ -121,6 +122,9 @@ pub fn run() {
             flows::load_flow,
             flows::flow_status,
             flows::unload_flow,
+            providers::list_providers,
+            providers::set_provider_api_key,
+            providers::list_cloud_models,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

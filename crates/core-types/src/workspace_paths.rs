@@ -38,3 +38,7 @@ pub fn registry_dir() -> PathBuf {
 pub fn flows_dir() -> PathBuf {
     workspace_root().join("flows")
 }
+
+pub fn env_file() -> PathBuf {
+    workspace_root().join(".env")
+}
