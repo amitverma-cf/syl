@@ -181,7 +181,10 @@ async fn run_generate_cloud(
         .map_err(|e| e.to_string())?
         .map_err(|e| e.to_string())?;
 
-        let client = provider::build_client(&workspace_paths::env_file());
+        let client = provider::build_client(
+            &workspace_paths::env_file(),
+            &workspace_paths::custom_providers_file(),
+        );
         let response = provider::stream_chat(&client, model_id, None, engine_prompt, |piece| {
             if let Err(err) = on_event.send(GenerationEvent::Piece {
                 text: piece.to_string(),

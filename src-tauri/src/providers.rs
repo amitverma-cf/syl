@@ -1,5 +1,5 @@
 use core_types::workspace_paths;
-use provider::{CloudModel, ProviderInfo};
+use provider::{CloudModel, CustomProviderConfig, ProviderInfo};
 
 #[tauri::command]
 pub fn list_providers() -> Vec<ProviderInfo> {
@@ -13,5 +13,30 @@ pub fn set_provider_api_key(env_var: String, key: String) -> Result<(), String> 
 
 #[tauri::command]
 pub fn list_cloud_models() -> Vec<CloudModel> {
-    provider::list_cloud_models()
+    provider::list_all_models(&workspace_paths::custom_providers_file())
+}
+
+#[tauri::command]
+pub fn list_custom_providers() -> Vec<CustomProviderConfig> {
+    provider::list_custom_providers(&workspace_paths::custom_providers_file())
+}
+
+#[tauri::command]
+pub async fn add_custom_provider(
+    name: String,
+    base_url: String,
+    api_key: Option<String>,
+) -> Result<CustomProviderConfig, String> {
+    tauri::async_runtime::spawn_blocking(move || {
+        provider::add_custom_provider(
+            &workspace_paths::custom_providers_file(),
+            &workspace_paths::env_file(),
+            &name,
+            &base_url,
+            api_key.as_deref(),
+        )
+        .map_err(|e| e.to_string())
+    })
+    .await
+    .map_err(|e| e.to_string())?
 }

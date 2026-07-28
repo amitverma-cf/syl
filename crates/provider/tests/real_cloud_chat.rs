@@ -9,6 +9,7 @@ use provider::{build_client, stream_chat};
 async fn streams_a_real_response_from_a_configured_provider() {
     let repo_root = Path::new(env!("CARGO_MANIFEST_DIR")).join("../..");
     let env_file = repo_root.join(".syl/.env");
+    let custom_providers_file = repo_root.join(".syl/custom_providers.json");
 
     let providers = provider::list_providers(&env_file);
     let configured = providers.iter().find(|p| p.configured).unwrap_or_else(|| {
@@ -21,7 +22,7 @@ async fn streams_a_real_response_from_a_configured_provider() {
         .map(|m| m.id)
         .unwrap_or_else(|| panic!("no catalog model for provider {}", configured.name));
 
-    let client = build_client(&env_file);
+    let client = build_client(&env_file, &custom_providers_file);
     let mut pieces = Vec::new();
     let full_text = stream_chat(
         &client,
