@@ -38,6 +38,12 @@ interface SystemStats {
   workspaceDiskBytes: number;
 }
 
+interface FlowStateInfo {
+  flowName: string;
+  stateName: string;
+  systemPrompt: string;
+}
+
 const CONVERSATION_ID = "default";
 
 function formatBytes(bytes: number): string {
@@ -64,6 +70,9 @@ function App() {
   const [downloadingModel, setDownloadingModel] = useState<string | null>(null);
   const [stats, setStats] = useState<SystemStats | null>(null);
 
+  const [availableFlows, setAvailableFlows] = useState<string[]>([]);
+  const [activeFlow, setActiveFlow] = useState<FlowStateInfo | null>(null);
+
   useEffect(() => {
     invoke<StoredMessage[]>("list_messages", { conversationId: CONVERSATION_ID })
       .then(setMessages)
@@ -88,6 +97,30 @@ function App() {
   useEffect(() => {
     refreshModels();
   }, []);
+
+  useEffect(() => {
+    invoke<string[]>("list_flows")
+      .then(setAvailableFlows)
+      .catch(() => {});
+    invoke<FlowStateInfo | null>("flow_status")
+      .then(setActiveFlow)
+      .catch(() => {});
+  }, []);
+
+  async function handleLoadFlow(name: string) {
+    setError(null);
+    try {
+      const info = await invoke<FlowStateInfo>("load_flow", { name });
+      setActiveFlow(info);
+    } catch (err) {
+      setError(String(err));
+    }
+  }
+
+  async function handleUnloadFlow() {
+    await invoke("unload_flow");
+    setActiveFlow(null);
+  }
 
   useEffect(() => {
     function poll() {
@@ -172,6 +205,9 @@ function App() {
         });
       } else if (event.type === "done") {
         setIsGenerating(false);
+        invoke<FlowStateInfo | null>("flow_status")
+          .then(setActiveFlow)
+          .catch(() => {});
       } else if (event.type === "error") {
         setError(event.message);
         setIsGenerating(false);
@@ -283,6 +319,38 @@ function App() {
           {isGenerating ? "Generating..." : "Send"}
         </button>
       </form>
+
+      <div className="flex w-full max-w-2xl flex-col gap-2 rounded border border-neutral-800 bg-neutral-900 p-4">
+        <div className="flex items-center justify-between">
+          <span className="text-sm font-medium">Flow</span>
+          {activeFlow && (
+            <button onClick={handleUnloadFlow} className="text-xs text-neutral-400 underline">
+              Unload
+            </button>
+          )}
+        </div>
+        {activeFlow ? (
+          <p className="text-sm">
+            <span className="font-mono">{activeFlow.flowName}</span> is in state{" "}
+            <span className="font-mono text-emerald-400">{activeFlow.stateName}</span>
+          </p>
+        ) : (
+          <div className="flex flex-wrap gap-2">
+            {availableFlows.length === 0 && (
+              <p className="text-sm text-neutral-500">No flows in .syl/flows yet.</p>
+            )}
+            {availableFlows.map((name) => (
+              <button
+                key={name}
+                onClick={() => handleLoadFlow(name)}
+                className="rounded bg-neutral-100 px-2 py-1 text-xs font-medium text-neutral-950"
+              >
+                Load {name}
+              </button>
+            ))}
+          </div>
+        )}
+      </div>
 
       <div className="flex w-full max-w-2xl flex-col gap-2 rounded border border-neutral-800 bg-neutral-900 p-4">
         <div className="flex items-center justify-between">

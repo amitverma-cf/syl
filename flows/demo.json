@@ -1,0 +1,19 @@
+{
+    "name": "demo",
+    "initial_state": "greeting",
+    "states": [
+        {
+            "name": "greeting",
+            "system_prompt": "You are a helpful assistant. Greet the user briefly and ask what file they'd like to look at.",
+            "tool_allowlist": ["read_file"],
+            "transitions": [{ "on": "message", "to_state": "file_summary" }]
+        },
+        {
+            "name": "file_summary",
+            "system_prompt": "The contents of the requested file are provided as context below. Summarize them for the user in a couple of sentences.",
+            "tool_allowlist": ["read_file"],
+            "on_enter_tool_call": { "tool": "read_file", "args": { "path": "notes.txt" } },
+            "transitions": [{ "on": "message", "to_state": "greeting" }]
+        }
+    ]
+}

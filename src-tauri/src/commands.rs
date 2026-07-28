@@ -6,6 +6,7 @@ use memory::{ConversationStore, Message, SqliteConversationStore};
 use plugin_registry::ModelKind;
 use tauri::ipc::Channel;
 
+use crate::flows::FlowState;
 use crate::{AppState, ToolState};
 
 #[derive(Clone, serde::Serialize)]
@@ -17,27 +18,78 @@ pub enum GenerationEvent {
 }
 
 #[tauri::command]
-#[tracing::instrument(skip(on_event, state))]
+#[tracing::instrument(skip(on_event, state, tool_state, flow_state))]
 pub async fn generate(
     prompt: String,
     conversation_id: String,
     on_event: Channel<GenerationEvent>,
     state: tauri::State<'_, AppState>,
+    tool_state: tauri::State<'_, ToolState>,
+    flow_state: tauri::State<'_, FlowState>,
 ) -> Result<(), String> {
     let store = state.conversation_store.clone();
-    tauri::async_runtime::spawn_blocking(move || {
-        match run_generate(&store, &conversation_id, &prompt, &on_event) {
-            Ok(()) => {
-                let _ = on_event.send(GenerationEvent::Done);
-            }
-            Err(message) => {
-                tracing::error!(%message, "generate failed");
-                let _ = on_event.send(GenerationEvent::Error { message });
-            }
+
+    let flow_turn = {
+        let runner = flow_state.runner.lock().unwrap();
+        runner.as_ref().map(|runner| {
+            (
+                runner.current_state().system_prompt.clone(),
+                runner.on_enter_tool_call().cloned(),
+            )
+        })
+    };
+
+    let tool_context = match flow_turn
+        .as_ref()
+        .and_then(|(_, tool_call)| tool_call.as_ref())
+    {
+        Some(tool_call) => {
+            let result = tool_state
+                .executor
+                .call(&conversation_id, &tool_call.tool, tool_call.args.clone())
+                .await
+                .map_err(|e| e.to_string())?;
+            Some(result.to_string())
         }
+        None => None,
+    };
+
+    let augmented_prompt = match &flow_turn {
+        Some((system_prompt, _)) => match &tool_context {
+            Some(tool_context) => {
+                format!("{system_prompt}\n\nTool output: {tool_context}\n\nUser: {prompt}")
+            }
+            None => format!("{system_prompt}\n\nUser: {prompt}"),
+        },
+        None => prompt.clone(),
+    };
+
+    let conversation_id_for_store = conversation_id.clone();
+    let generation_result = tauri::async_runtime::spawn_blocking(move || {
+        run_generate(
+            &store,
+            &conversation_id_for_store,
+            &prompt,
+            &augmented_prompt,
+            &on_event,
+        )
     })
     .await
-    .map_err(|e| e.to_string())
+    .map_err(|e| e.to_string())?;
+
+    match generation_result {
+        Ok(()) => {
+            if flow_turn.is_some() {
+                if let Some(runner) = flow_state.runner.lock().unwrap().as_mut() {
+                    runner.advance("message");
+                }
+            }
+        }
+        Err(message) => {
+            tracing::error!(%message, "generate failed");
+        }
+    }
+    Ok(())
 }
 
 #[tauri::command]
@@ -79,40 +131,55 @@ fn run_generate(
     store: &Arc<SqliteConversationStore>,
     conversation_id: &str,
     prompt: &str,
+    engine_prompt: &str,
     on_event: &Channel<GenerationEvent>,
 ) -> Result<(), String> {
-    store
-        .append_message(conversation_id, "user", prompt)
+    let result = (|| -> Result<(), String> {
+        store
+            .append_message(conversation_id, "user", prompt)
+            .map_err(|e| e.to_string())?;
+
+        let resolved = plugin_registry::resolve_model_for_kind(
+            &workspace_paths::registry_dir(),
+            &workspace_paths::models_dir(),
+            &workspace_paths::engines_dir(),
+            ModelKind::Chat,
+        )
         .map_err(|e| e.to_string())?;
 
-    let resolved = plugin_registry::resolve_model_for_kind(
-        &workspace_paths::registry_dir(),
-        &workspace_paths::models_dir(),
-        &workspace_paths::engines_dir(),
-        ModelKind::Chat,
-    )
-    .map_err(|e| e.to_string())?;
-
-    let mut engine = LlamaEngine::load(
-        &resolved.engine_library_path,
-        &resolved.model_path,
-        2048,
-        false,
-    )
-    .map_err(|e| e.to_string())?;
-
-    let response = engine
-        .generate(prompt, 128, |piece| {
-            if let Err(err) = on_event.send(GenerationEvent::Piece {
-                text: piece.to_string(),
-            }) {
-                tracing::error!(?err, "failed to send piece to channel");
-            }
-        })
+        let mut engine = LlamaEngine::load(
+            &resolved.engine_library_path,
+            &resolved.model_path,
+            2048,
+            false,
+        )
         .map_err(|e| e.to_string())?;
 
-    store
-        .append_message(conversation_id, "assistant", &response)
-        .map_err(|e| e.to_string())?;
-    Ok(())
+        let response = engine
+            .generate(engine_prompt, 128, |piece| {
+                if let Err(err) = on_event.send(GenerationEvent::Piece {
+                    text: piece.to_string(),
+                }) {
+                    tracing::error!(?err, "failed to send piece to channel");
+                }
+            })
+            .map_err(|e| e.to_string())?;
+
+        store
+            .append_message(conversation_id, "assistant", &response)
+            .map_err(|e| e.to_string())?;
+        Ok(())
+    })();
+
+    match &result {
+        Ok(()) => {
+            let _ = on_event.send(GenerationEvent::Done);
+        }
+        Err(message) => {
+            let _ = on_event.send(GenerationEvent::Error {
+                message: message.clone(),
+            });
+        }
+    }
+    result
 }
