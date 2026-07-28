@@ -8,4 +8,3 @@ license.workspace = true
 core-types.workspace = true
 serde.workspace = true
 serde_json.workspace = true
-simd-json.workspace = true

@@ -21,6 +21,6 @@ pub struct Flow {
     pub states: Vec<FlowState>,
 }
 
-pub fn parse_flow(mut json_bytes: Vec<u8>) -> Result<Flow, simd_json::Error> {
-    simd_json::from_slice(&mut json_bytes)
+pub fn parse_flow(json_bytes: &[u8]) -> Result<Flow, serde_json::Error> {
+    serde_json::from_slice(json_bytes)
 }
