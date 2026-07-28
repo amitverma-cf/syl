@@ -1,5 +1,6 @@
 mod bootstrap;
 mod commands;
+mod daemon;
 mod flows;
 mod logging;
 mod models;
@@ -9,10 +10,14 @@ mod permission;
 use std::sync::Arc;
 
 use core_types::workspace_paths;
+use daemon::DaemonState;
 use memory::SqliteConversationStore;
 use observability::ObservabilityState;
 use permission::TauriPermissionPrompter;
-use tauri::Manager;
+use tauri::menu::{Menu, MenuItem};
+use tauri::tray::TrayIconBuilder;
+use tauri::{Manager, WindowEvent};
+use tauri_plugin_autostart::MacosLauncher;
 use tool::{ReadFileTool, RunCommandTool, ToolExecutor, WriteFileTool};
 
 pub struct AppState {
@@ -38,8 +43,20 @@ pub fn run() {
 
     tauri::Builder::default()
         .plugin(tauri_plugin_opener::init())
+        .plugin(tauri_plugin_autostart::init(
+            MacosLauncher::LaunchAgent,
+            None,
+        ))
         .manage(AppState {
             conversation_store: conversation_store.clone(),
+        })
+        .on_window_event(|window, event| {
+            if let WindowEvent::CloseRequested { api, .. } = event {
+                // Hide instead of quitting so the daemon (cron jobs, event bus) keeps running
+                // in the background — matches the tray-resident, not-a-true-OS-service design.
+                let _ = window.hide();
+                api.prevent_close();
+            }
         })
         .setup(move |app| {
             let prompter = Arc::new(TauriPermissionPrompter::new(app.handle().clone()));
@@ -66,6 +83,29 @@ pub fn run() {
             app.manage(observability_state);
 
             app.manage(flows::FlowState::default());
+
+            let daemon_state = DaemonState::default();
+            let event_bus = daemon_state.event_bus.clone();
+            app.manage(daemon_state);
+            tauri::async_runtime::spawn(daemon::spawn(event_bus));
+
+            let show_item = MenuItem::with_id(app, "show", "Show", true, None::<&str>)?;
+            let quit_item = MenuItem::with_id(app, "quit", "Quit", true, None::<&str>)?;
+            let tray_menu = Menu::with_items(app, &[&show_item, &quit_item])?;
+            TrayIconBuilder::new()
+                .icon(app.default_window_icon().unwrap().clone())
+                .menu(&tray_menu)
+                .on_menu_event(|app, event| match event.id.as_ref() {
+                    "show" => {
+                        if let Some(window) = app.get_webview_window("main") {
+                            let _ = window.show();
+                            let _ = window.set_focus();
+                        }
+                    }
+                    "quit" => app.exit(0),
+                    _ => {}
+                })
+                .build(app)?;
 
             Ok(())
         })

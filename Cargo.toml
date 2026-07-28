@@ -40,3 +40,5 @@ rusqlite = { version = "0.31", features = ["bundled"] }
 ureq = { version = "2", features = ["tls"] }
 sysinfo = "0.32"
 jsonschema = { version = "0.49", default-features = false }
+tokio-cron-scheduler = "0.15"
+tauri-plugin-autostart = "2.5"

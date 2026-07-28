@@ -4,6 +4,7 @@ use tokio::sync::broadcast;
 pub enum DaemonEvent {
     FlowStateChanged { flow: String, state: String },
     ToolCallCompleted { tool: String, ok: bool },
+    RegistryPolled { ok: bool },
 }
 
 pub struct EventBus {

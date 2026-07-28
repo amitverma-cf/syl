@@ -1,11 +1,13 @@
 use std::sync::Arc;
 
 use core_types::workspace_paths;
+use daemon::events::DaemonEvent;
 use engine_host::llama::LlamaEngine;
 use memory::{ConversationStore, Message, SqliteConversationStore};
 use plugin_registry::ModelKind;
 use tauri::ipc::Channel;
 
+use crate::daemon::DaemonState;
 use crate::flows::FlowState;
 use crate::{AppState, ToolState};
 
@@ -18,7 +20,7 @@ pub enum GenerationEvent {
 }
 
 #[tauri::command]
-#[tracing::instrument(skip(on_event, state, tool_state, flow_state))]
+#[tracing::instrument(skip(on_event, state, tool_state, flow_state, daemon_state))]
 pub async fn generate(
     prompt: String,
     conversation_id: String,
@@ -26,6 +28,7 @@ pub async fn generate(
     state: tauri::State<'_, AppState>,
     tool_state: tauri::State<'_, ToolState>,
     flow_state: tauri::State<'_, FlowState>,
+    daemon_state: tauri::State<'_, DaemonState>,
 ) -> Result<(), String> {
     let store = state.conversation_store.clone();
 
@@ -44,12 +47,17 @@ pub async fn generate(
         .and_then(|(_, tool_call)| tool_call.as_ref())
     {
         Some(tool_call) => {
-            let result = tool_state
+            let call_result = tool_state
                 .executor
                 .call(&conversation_id, &tool_call.tool, tool_call.args.clone())
-                .await
-                .map_err(|e| e.to_string())?;
-            Some(result.to_string())
+                .await;
+            daemon_state
+                .event_bus
+                .publish(DaemonEvent::ToolCallCompleted {
+                    tool: tool_call.tool.clone(),
+                    ok: call_result.is_ok(),
+                });
+            Some(call_result.map_err(|e| e.to_string())?.to_string())
         }
         None => None,
     };
@@ -80,8 +88,15 @@ pub async fn generate(
     match generation_result {
         Ok(()) => {
             if flow_turn.is_some() {
-                if let Some(runner) = flow_state.runner.lock().unwrap().as_mut() {
+                let mut runner_guard = flow_state.runner.lock().unwrap();
+                if let Some(runner) = runner_guard.as_mut() {
                     runner.advance("message");
+                    daemon_state
+                        .event_bus
+                        .publish(DaemonEvent::FlowStateChanged {
+                            flow: runner.flow_name().to_string(),
+                            state: runner.current_state().name.clone(),
+                        });
                 }
             }
         }
@@ -109,12 +124,16 @@ pub async fn call_tool(
     name: String,
     args: serde_json::Value,
     state: tauri::State<'_, ToolState>,
+    daemon_state: tauri::State<'_, DaemonState>,
 ) -> Result<serde_json::Value, String> {
-    state
-        .executor
-        .call(&conversation_id, &name, args)
-        .await
-        .map_err(|e| e.to_string())
+    let result = state.executor.call(&conversation_id, &name, args).await;
+    daemon_state
+        .event_bus
+        .publish(DaemonEvent::ToolCallCompleted {
+            tool: name,
+            ok: result.is_ok(),
+        });
+    result.map_err(|e| e.to_string())
 }
 
 #[tauri::command]
