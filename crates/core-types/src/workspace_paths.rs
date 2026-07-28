@@ -50,3 +50,7 @@ pub fn custom_providers_file() -> PathBuf {
 pub fn mcp_servers_file() -> PathBuf {
     workspace_root().join("mcp_servers.json")
 }
+
+pub fn scheduled_jobs_file() -> PathBuf {
+    workspace_root().join("scheduled_jobs.json")
+}

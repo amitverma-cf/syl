@@ -8,6 +8,7 @@ mod models;
 mod observability;
 mod permission;
 mod providers;
+mod scheduled_jobs;
 
 use std::sync::Arc;
 
@@ -88,10 +89,8 @@ pub fn run() {
 
             app.manage(flows::FlowState::default());
 
-            let daemon_state = DaemonState::default();
-            let event_bus = daemon_state.event_bus.clone();
-            app.manage(daemon_state);
-            tauri::async_runtime::spawn(daemon::spawn(event_bus));
+            app.manage(DaemonState::default());
+            tauri::async_runtime::spawn(daemon::spawn(app.handle().clone()));
 
             let show_item = MenuItem::with_id(app, "show", "Show", true, None::<&str>)?;
             let quit_item = MenuItem::with_id(app, "quit", "Quit", true, None::<&str>)?;
@@ -137,6 +136,9 @@ pub fn run() {
             mcp::list_mcp_servers,
             mcp::add_mcp_server,
             mcp::remove_mcp_server,
+            scheduled_jobs::list_scheduled_jobs,
+            scheduled_jobs::add_scheduled_job,
+            scheduled_jobs::remove_scheduled_job,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

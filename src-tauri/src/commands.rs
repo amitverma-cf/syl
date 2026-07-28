@@ -42,6 +42,7 @@ pub async fn generate(
 
     let conversation_id_for_store = conversation_id.clone();
     let cloud_model = model.filter(|m| !m.is_empty());
+    let piece_event = on_event.clone();
     let generation_result = match cloud_model {
         Some(model_id) => {
             run_generate_cloud(
@@ -52,7 +53,7 @@ pub async fn generate(
                 &model_id,
                 &tool_specs,
                 &tool_state.executor,
-                &on_event,
+                move |piece| send_piece(&piece_event, piece),
             )
             .await
         }
@@ -67,7 +68,7 @@ pub async fn generate(
                     &system_prompt,
                     &tool_specs,
                     &executor,
-                    &on_event,
+                    move |piece| send_piece(&piece_event, piece),
                 )
             })
             .await
@@ -75,8 +76,9 @@ pub async fn generate(
         }
     };
 
-    match generation_result {
+    match &generation_result {
         Ok(()) => {
+            let _ = on_event.send(GenerationEvent::Done);
             if let Some(info) = flow_state.advance(&conversation_id, "message") {
                 daemon_state
                     .event_bus
@@ -88,9 +90,20 @@ pub async fn generate(
         }
         Err(message) => {
             tracing::error!(%message, "generate failed");
+            let _ = on_event.send(GenerationEvent::Error {
+                message: message.clone(),
+            });
         }
     }
     Ok(())
+}
+
+fn send_piece(on_event: &Channel<GenerationEvent>, piece: &str) {
+    if let Err(err) = on_event.send(GenerationEvent::Piece {
+        text: piece.to_string(),
+    }) {
+        tracing::error!(?err, "failed to send piece to channel");
+    }
 }
 
 #[tauri::command]
@@ -173,9 +186,13 @@ pub fn respond_permission(
     state.prompter.resolve(request_id, response);
 }
 
-#[tracing::instrument(skip(store, tools, executor, on_event))]
+/// Runs one cloud/custom-model tool-calling turn: appends the user message, drives
+/// `provider::chat_with_tools` (streaming pieces via `on_piece`), and appends the assistant's
+/// final answer. Shared by the live `generate` command (`on_piece` forwards to the UI's
+/// `Channel`) and unattended scheduled-job firings (`on_piece` is a no-op).
+#[tracing::instrument(skip(store, tools, executor, on_piece))]
 #[allow(clippy::too_many_arguments)]
-async fn run_generate_cloud(
+pub(crate) async fn run_generate_cloud(
     store: &Arc<SqliteConversationStore>,
     conversation_id: &str,
     prompt: &str,
@@ -183,131 +200,92 @@ async fn run_generate_cloud(
     model_id: &str,
     tools: &[tool::ToolSpec],
     executor: &ToolExecutor,
-    on_event: &Channel<GenerationEvent>,
+    mut on_piece: impl FnMut(&str) + Send,
 ) -> Result<(), String> {
-    let result: Result<(), String> = async {
-        let store_for_user = store.clone();
-        let conversation_id_owned = conversation_id.to_string();
-        let prompt_owned = prompt.to_string();
-        tauri::async_runtime::spawn_blocking(move || {
-            store_for_user.append_message(&conversation_id_owned, "user", &prompt_owned)
-        })
-        .await
-        .map_err(|e| e.to_string())?
-        .map_err(|e| e.to_string())?;
+    let store_for_user = store.clone();
+    let conversation_id_owned = conversation_id.to_string();
+    let prompt_owned = prompt.to_string();
+    tauri::async_runtime::spawn_blocking(move || {
+        store_for_user.append_message(&conversation_id_owned, "user", &prompt_owned)
+    })
+    .await
+    .map_err(|e| e.to_string())?
+    .map_err(|e| e.to_string())?;
 
-        let client = provider::build_client(
-            &workspace_paths::env_file(),
-            &workspace_paths::custom_providers_file(),
-        );
-        let response = provider::chat_with_tools(
-            &client,
-            model_id,
-            Some(system_prompt),
-            prompt,
-            tools,
-            executor,
-            conversation_id,
-            |piece| {
-                if let Err(err) = on_event.send(GenerationEvent::Piece {
-                    text: piece.to_string(),
-                }) {
-                    tracing::error!(?err, "failed to send piece to channel");
-                }
-            },
-        )
-        .await
-        .map_err(|e| e.to_string())?;
+    let client = provider::build_client(
+        &workspace_paths::env_file(),
+        &workspace_paths::custom_providers_file(),
+    );
+    let response = provider::chat_with_tools(
+        &client,
+        model_id,
+        Some(system_prompt),
+        prompt,
+        tools,
+        executor,
+        conversation_id,
+        |piece| on_piece(piece),
+    )
+    .await
+    .map_err(|e| e.to_string())?;
 
-        let store_for_assistant = store.clone();
-        let conversation_id_owned = conversation_id.to_string();
-        tauri::async_runtime::spawn_blocking(move || {
-            store_for_assistant.append_message(&conversation_id_owned, "assistant", &response)
-        })
-        .await
-        .map_err(|e| e.to_string())?
-        .map_err(|e| e.to_string())?;
-        Ok(())
-    }
-    .await;
-
-    match &result {
-        Ok(()) => {
-            let _ = on_event.send(GenerationEvent::Done);
-        }
-        Err(message) => {
-            let _ = on_event.send(GenerationEvent::Error {
-                message: message.clone(),
-            });
-        }
-    }
-    result
+    let store_for_assistant = store.clone();
+    let conversation_id_owned = conversation_id.to_string();
+    tauri::async_runtime::spawn_blocking(move || {
+        store_for_assistant.append_message(&conversation_id_owned, "assistant", &response)
+    })
+    .await
+    .map_err(|e| e.to_string())?
+    .map_err(|e| e.to_string())?;
+    Ok(())
 }
 
-#[tracing::instrument(skip(store, tools, executor, on_event))]
+/// Local-model counterpart of [`run_generate_cloud`] — same shape, but drives
+/// `engine_host::tool_loop::generate_with_tools` against a locally loaded llama.cpp model.
+#[tracing::instrument(skip(store, tools, executor, on_piece))]
 #[allow(clippy::too_many_arguments)]
-fn run_generate(
+pub(crate) fn run_generate(
     store: &Arc<SqliteConversationStore>,
     conversation_id: &str,
     prompt: &str,
     system_prompt: &str,
     tools: &[tool::ToolSpec],
     executor: &ToolExecutor,
-    on_event: &Channel<GenerationEvent>,
+    mut on_piece: impl FnMut(&str),
 ) -> Result<(), String> {
-    let result = (|| -> Result<(), String> {
-        store
-            .append_message(conversation_id, "user", prompt)
-            .map_err(|e| e.to_string())?;
-
-        let resolved = plugin_registry::resolve_model_for_kind(
-            &workspace_paths::registry_dir(),
-            &workspace_paths::models_dir(),
-            &workspace_paths::engines_dir(),
-            ModelKind::Chat,
-        )
+    store
+        .append_message(conversation_id, "user", prompt)
         .map_err(|e| e.to_string())?;
 
-        let mut engine = LlamaEngine::load(
-            &resolved.engine_library_path,
-            &resolved.model_path,
-            2048,
-            false,
-        )
+    let resolved = plugin_registry::resolve_model_for_kind(
+        &workspace_paths::registry_dir(),
+        &workspace_paths::models_dir(),
+        &workspace_paths::engines_dir(),
+        ModelKind::Chat,
+    )
+    .map_err(|e| e.to_string())?;
+
+    let mut engine = LlamaEngine::load(
+        &resolved.engine_library_path,
+        &resolved.model_path,
+        2048,
+        false,
+    )
+    .map_err(|e| e.to_string())?;
+
+    let response = engine_host::tool_loop::generate_with_tools(
+        &mut engine,
+        system_prompt,
+        prompt,
+        tools,
+        executor,
+        conversation_id,
+        128,
+        |piece| on_piece(piece),
+    )?;
+
+    store
+        .append_message(conversation_id, "assistant", &response)
         .map_err(|e| e.to_string())?;
-
-        let response = engine_host::tool_loop::generate_with_tools(
-            &mut engine,
-            system_prompt,
-            prompt,
-            tools,
-            executor,
-            conversation_id,
-            128,
-            |piece| {
-                if let Err(err) = on_event.send(GenerationEvent::Piece {
-                    text: piece.to_string(),
-                }) {
-                    tracing::error!(?err, "failed to send piece to channel");
-                }
-            },
-        )?;
-
-        store
-            .append_message(conversation_id, "assistant", &response)
-            .map_err(|e| e.to_string())?;
-        Ok(())
-    })();
-
-    match &result {
-        Ok(()) => {
-            let _ = on_event.send(GenerationEvent::Done);
-        }
-        Err(message) => {
-            let _ = on_event.send(GenerationEvent::Error {
-                message: message.clone(),
-            });
-        }
-    }
-    result
+    Ok(())
 }

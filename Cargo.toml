@@ -41,6 +41,7 @@ ureq = { version = "2", features = ["tls"] }
 sysinfo = "0.32"
 jsonschema = { version = "0.49", default-features = false }
 tokio-cron-scheduler = "0.15"
+uuid = { version = "1", features = ["v4", "serde"] }
 tauri-plugin-autostart = "2.5"
 genai = { version = "0.6", default-features = false, features = ["rustls-tls"] }
 futures-util = "0.3"
