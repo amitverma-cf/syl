@@ -3,26 +3,45 @@ use std::sync::Mutex;
 
 use rusqlite::Connection;
 
-use crate::{ConversationStore, MemoryError, Message};
+use crate::{ConversationStore, EmbeddingMatch, EmbeddingStore, MemoryError, Message};
 
 pub struct SqliteConversationStore {
     conn: Mutex<Connection>,
 }
 
+const SCHEMA: &str = "
+    CREATE TABLE IF NOT EXISTS messages (
+        id              INTEGER PRIMARY KEY AUTOINCREMENT,
+        conversation_id TEXT NOT NULL,
+        role            TEXT NOT NULL,
+        content         TEXT NOT NULL,
+        created_at      INTEGER NOT NULL
+    );
+    CREATE INDEX IF NOT EXISTS idx_messages_conversation
+        ON messages (conversation_id, id);
+    CREATE TABLE IF NOT EXISTS embeddings (
+        id              INTEGER PRIMARY KEY AUTOINCREMENT,
+        conversation_id TEXT NOT NULL,
+        content         TEXT NOT NULL,
+        dims            INTEGER NOT NULL,
+        vector          BLOB NOT NULL
+    );
+    CREATE INDEX IF NOT EXISTS idx_embeddings_conversation
+        ON embeddings (conversation_id);
+";
+
 impl SqliteConversationStore {
     pub fn open(db_path: &Path) -> Result<Self, MemoryError> {
         let conn = Connection::open(db_path)?;
-        conn.execute_batch(
-            "CREATE TABLE IF NOT EXISTS messages (
-                id              INTEGER PRIMARY KEY AUTOINCREMENT,
-                conversation_id TEXT NOT NULL,
-                role            TEXT NOT NULL,
-                content         TEXT NOT NULL,
-                created_at      INTEGER NOT NULL
-            );
-            CREATE INDEX IF NOT EXISTS idx_messages_conversation
-                ON messages (conversation_id, id);",
-        )?;
+        conn.execute_batch(SCHEMA)?;
+        Ok(Self {
+            conn: Mutex::new(conn),
+        })
+    }
+
+    pub fn open_in_memory() -> Result<Self, MemoryError> {
+        let conn = Connection::open_in_memory()?;
+        conn.execute_batch(SCHEMA)?;
         Ok(Self {
             conn: Mutex::new(conn),
         })
@@ -79,71 +98,82 @@ impl ConversationStore for SqliteConversationStore {
     }
 }
 
-#[cfg(test)]
-mod tests {
-    use super::*;
+impl EmbeddingStore for SqliteConversationStore {
+    fn store_embedding(
+        &self,
+        conversation_id: &str,
+        content: &str,
+        embedding: &[f32],
+    ) -> Result<(), MemoryError> {
+        let conn = self
+            .conn
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
+        conn.execute(
+            "INSERT INTO embeddings (conversation_id, content, dims, vector)
+             VALUES (?1, ?2, ?3, ?4)",
+            (
+                conversation_id,
+                content,
+                embedding.len() as i64,
+                encode_vector(embedding),
+            ),
+        )?;
+        Ok(())
+    }
 
-    fn in_memory_store() -> SqliteConversationStore {
-        let conn = Connection::open_in_memory().unwrap();
-        conn.execute_batch(
-            "CREATE TABLE messages (
-                id              INTEGER PRIMARY KEY AUTOINCREMENT,
-                conversation_id TEXT NOT NULL,
-                role            TEXT NOT NULL,
-                content         TEXT NOT NULL,
-                created_at      INTEGER NOT NULL
-            );",
-        )
-        .unwrap();
-        SqliteConversationStore {
-            conn: Mutex::new(conn),
+    fn search_similar(
+        &self,
+        conversation_id: &str,
+        query: &[f32],
+        top_k: usize,
+    ) -> Result<Vec<EmbeddingMatch>, MemoryError> {
+        let conn = self
+            .conn
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
+        let mut stmt =
+            conn.prepare("SELECT content, vector FROM embeddings WHERE conversation_id = ?1")?;
+        let rows = stmt.query_map((conversation_id,), |row| {
+            let content: String = row.get(0)?;
+            let vector: Vec<u8> = row.get(1)?;
+            Ok((content, vector))
+        })?;
+
+        let mut scored = Vec::new();
+        for row in rows {
+            let (content, raw) = row?;
+            let vector = decode_vector(&raw)?;
+            let score = cosine_similarity(query, &vector);
+            scored.push(EmbeddingMatch { content, score });
         }
+
+        scored.sort_by(|a, b| b.score.total_cmp(&a.score));
+        scored.truncate(top_k);
+        Ok(scored)
     }
+}
 
-    #[test]
-    fn append_then_list_returns_messages_in_order() {
-        let store = in_memory_store();
-        store.append_message("c1", "user", "hello").unwrap();
-        store.append_message("c1", "assistant", "hi there").unwrap();
+fn encode_vector(vector: &[f32]) -> Vec<u8> {
+    vector.iter().flat_map(|f| f.to_le_bytes()).collect()
+}
 
-        let messages = store.list_messages("c1").unwrap();
-        assert_eq!(messages.len(), 2);
-        assert_eq!(messages[0].role, "user");
-        assert_eq!(messages[0].content, "hello");
-        assert_eq!(messages[1].role, "assistant");
-        assert_eq!(messages[1].content, "hi there");
+fn decode_vector(raw: &[u8]) -> Result<Vec<f32>, MemoryError> {
+    if !raw.len().is_multiple_of(4) {
+        return Err(MemoryError::CorruptEmbedding(raw.len()));
     }
+    Ok(raw
+        .chunks_exact(4)
+        .map(|chunk| f32::from_le_bytes([chunk[0], chunk[1], chunk[2], chunk[3]]))
+        .collect())
+}
 
-    #[test]
-    fn list_messages_on_unknown_conversation_returns_empty() {
-        let store = in_memory_store();
-        let messages = store.list_messages("does-not-exist").unwrap();
-        assert!(messages.is_empty());
+fn cosine_similarity(a: &[f32], b: &[f32]) -> f32 {
+    let dot: f32 = a.iter().zip(b).map(|(x, y)| x * y).sum();
+    let norm_a: f32 = a.iter().map(|x| x * x).sum::<f32>().sqrt();
+    let norm_b: f32 = b.iter().map(|x| x * x).sum::<f32>().sqrt();
+    if norm_a == 0.0 || norm_b == 0.0 {
+        return 0.0;
     }
-
-    #[test]
-    fn conversations_do_not_leak_into_each_other() {
-        let store = in_memory_store();
-        store.append_message("c1", "user", "in c1").unwrap();
-        store.append_message("c2", "user", "in c2").unwrap();
-
-        let c1_messages = store.list_messages("c1").unwrap();
-        assert_eq!(c1_messages.len(), 1);
-        assert_eq!(c1_messages[0].content, "in c1");
-    }
-
-    #[test]
-    fn open_creates_schema_on_a_fresh_database() {
-        let dir = std::env::temp_dir().join(format!("syl-memory-test-{}", std::process::id()));
-        std::fs::create_dir_all(&dir).unwrap();
-        let db_path = dir.join("test.sqlite");
-
-        let store = SqliteConversationStore::open(&db_path).unwrap();
-        store.append_message("c1", "user", "hello").unwrap();
-        let messages = store.list_messages("c1").unwrap();
-        assert_eq!(messages.len(), 1);
-
-        drop(store);
-        std::fs::remove_dir_all(&dir).unwrap();
-    }
+    dot / (norm_a * norm_b)
 }

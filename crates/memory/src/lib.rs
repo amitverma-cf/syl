@@ -14,6 +14,8 @@ pub enum MemoryError {
         #[source]
         source: std::io::Error,
     },
+    #[error("stored embedding has a corrupt length ({0} bytes, not a multiple of 4)")]
+    CorruptEmbedding(usize),
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
@@ -21,6 +23,12 @@ pub struct Message {
     pub role: String,
     pub content: String,
     pub created_at: i64,
+}
+
+#[derive(Debug, Clone, PartialEq, serde::Serialize, serde::Deserialize)]
+pub struct EmbeddingMatch {
+    pub content: String,
+    pub score: f32,
 }
 
 pub trait ConversationStore: Send + Sync {
@@ -32,6 +40,22 @@ pub trait ConversationStore: Send + Sync {
     ) -> Result<(), MemoryError>;
 
     fn list_messages(&self, conversation_id: &str) -> Result<Vec<Message>, MemoryError>;
+}
+
+pub trait EmbeddingStore: Send + Sync {
+    fn store_embedding(
+        &self,
+        conversation_id: &str,
+        content: &str,
+        embedding: &[f32],
+    ) -> Result<(), MemoryError>;
+
+    fn search_similar(
+        &self,
+        conversation_id: &str,
+        query: &[f32],
+        top_k: usize,
+    ) -> Result<Vec<EmbeddingMatch>, MemoryError>;
 }
 
 pub fn open(db_path: &Path) -> Result<SqliteConversationStore, MemoryError> {

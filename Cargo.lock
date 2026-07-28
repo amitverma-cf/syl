@@ -2114,6 +2114,8 @@ name = "memory"
 version = "0.1.0"
 dependencies = [
  "core-types",
+ "engine-host",
+ "plugin-registry",
  "rusqlite",
  "serde",
  "thiserror 1.0.69",

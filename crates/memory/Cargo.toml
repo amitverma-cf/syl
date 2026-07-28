@@ -9,3 +9,7 @@ core-types.workspace = true
 thiserror.workspace = true
 serde.workspace = true
 rusqlite = { workspace = true, features = ["bundled"] }
+
+[dev-dependencies]
+engine-host.workspace = true
+plugin-registry.workspace = true
