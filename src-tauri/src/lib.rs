@@ -1,5 +1,6 @@
 mod bootstrap;
 mod commands;
+mod flows;
 mod logging;
 mod models;
 mod observability;
@@ -64,6 +65,8 @@ pub fn run() {
             observability::spawn_sampler(observability_state.clone());
             app.manage(observability_state);
 
+            app.manage(flows::FlowState::default());
+
             Ok(())
         })
         .invoke_handler(tauri::generate_handler![
@@ -74,6 +77,10 @@ pub fn run() {
             models::list_available_models,
             models::download_model,
             observability::system_stats,
+            flows::list_flows,
+            flows::load_flow,
+            flows::flow_status,
+            flows::unload_flow,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

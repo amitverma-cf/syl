@@ -6,5 +6,7 @@ license.workspace = true
 
 [dependencies]
 core-types.workspace = true
+jsonschema.workspace = true
 serde.workspace = true
 serde_json.workspace = true
+thiserror.workspace = true

@@ -39,6 +39,16 @@ pub fn ensure_workspace_seeded() {
 
     let _ = std::fs::remove_file(syl_registry_dir.join("local.engines.json"));
     let _ = std::fs::remove_file(syl_registry_dir.join("local.models.json"));
+
+    seed_flows();
+}
+
+fn seed_flows() {
+    let repo_flows_dir = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../flows");
+    let dest_dir = workspace_paths::flows_dir();
+    if let Err(err) = copy_dir_files(&repo_flows_dir, &dest_dir) {
+        tracing::warn!(?err, "failed to seed .syl/flows");
+    }
 }
 
 fn seed_engine(entry: EngineEntry) -> Option<EngineEntry> {
