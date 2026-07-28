@@ -1,4 +1,4 @@
-use tool::{McpServerConfig, McpToolBridge, Tool};
+use tool::{McpServerConfig, McpToolBridge, McpTransportConfig, Tool};
 
 /// Connects to the official MCP reference filesystem server
 /// (`@modelcontextprotocol/server-filesystem`, spawned via `npx`) over real stdio, lists its
@@ -23,12 +23,14 @@ async fn connects_lists_tools_and_reads_a_real_file_via_a_real_mcp_server() {
     let npx_command = if cfg!(windows) { "npx.cmd" } else { "npx" };
     let config = McpServerConfig {
         name: "filesystem".to_string(),
-        command: npx_command.to_string(),
-        args: vec![
-            "-y".to_string(),
-            "@modelcontextprotocol/server-filesystem".to_string(),
-            workspace.to_string_lossy().to_string(),
-        ],
+        transport: McpTransportConfig::Stdio {
+            command: npx_command.to_string(),
+            args: vec![
+                "-y".to_string(),
+                "@modelcontextprotocol/server-filesystem".to_string(),
+                workspace.to_string_lossy().to_string(),
+            ],
+        },
     };
 
     let (bridges, descriptors) = McpToolBridge::connect(&config).await.unwrap();

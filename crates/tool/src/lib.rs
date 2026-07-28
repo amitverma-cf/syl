@@ -5,6 +5,7 @@ mod native;
 pub use context::compress_context;
 pub use mcp::{
     load_mcp_servers, save_mcp_servers, McpServerConfig, McpToolBridge, McpToolDescriptor,
+    McpTransportConfig,
 };
 pub use native::{ReadFileTool, RunCommandTool, WriteFileTool};
 
