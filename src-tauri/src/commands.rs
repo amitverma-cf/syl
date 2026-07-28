@@ -3,12 +3,12 @@ use std::sync::Arc;
 use core_types::workspace_paths;
 use daemon::events::DaemonEvent;
 use engine_host::llama::LlamaEngine;
-use memory::{ConversationStore, Message, SqliteConversationStore};
+use memory::{ConversationStore, ConversationSummary, Message, SqliteConversationStore};
 use plugin_registry::ModelKind;
 use tauri::ipc::Channel;
 
 use crate::daemon::DaemonState;
-use crate::flows::FlowState;
+use crate::flows::{FlowState, DEFAULT_FLOW_NAME};
 use crate::{AppState, ToolState};
 
 #[derive(Clone, serde::Serialize)]
@@ -34,20 +34,9 @@ pub async fn generate(
 ) -> Result<(), String> {
     let store = state.conversation_store.clone();
 
-    let flow_turn = {
-        let runner = flow_state.runner.lock().unwrap();
-        runner.as_ref().map(|runner| {
-            (
-                runner.current_state().system_prompt.clone(),
-                runner.on_enter_tool_call().cloned(),
-            )
-        })
-    };
+    let flow_turn = flow_state.ensure_and_take_turn(&conversation_id)?;
 
-    let tool_context = match flow_turn
-        .as_ref()
-        .and_then(|(_, tool_call)| tool_call.as_ref())
-    {
+    let tool_context = match &flow_turn.on_enter_tool_call {
         Some(tool_call) => {
             let call_result = tool_state
                 .executor
@@ -64,14 +53,12 @@ pub async fn generate(
         None => None,
     };
 
-    let augmented_prompt = match &flow_turn {
-        Some((system_prompt, _)) => match &tool_context {
-            Some(tool_context) => {
-                format!("{system_prompt}\n\nTool output: {tool_context}\n\nUser: {prompt}")
-            }
-            None => format!("{system_prompt}\n\nUser: {prompt}"),
-        },
-        None => prompt.clone(),
+    let system_prompt = &flow_turn.system_prompt;
+    let augmented_prompt = match &tool_context {
+        Some(tool_context) => {
+            format!("{system_prompt}\n\nTool output: {tool_context}\n\nUser: {prompt}")
+        }
+        None => format!("{system_prompt}\n\nUser: {prompt}"),
     };
 
     let conversation_id_for_store = conversation_id.clone();
@@ -103,17 +90,13 @@ pub async fn generate(
 
     match generation_result {
         Ok(()) => {
-            if flow_turn.is_some() {
-                let mut runner_guard = flow_state.runner.lock().unwrap();
-                if let Some(runner) = runner_guard.as_mut() {
-                    runner.advance("message");
-                    daemon_state
-                        .event_bus
-                        .publish(DaemonEvent::FlowStateChanged {
-                            flow: runner.flow_name().to_string(),
-                            state: runner.current_state().name.clone(),
-                        });
-                }
+            if let Some(info) = flow_state.advance(&conversation_id, "message") {
+                daemon_state
+                    .event_bus
+                    .publish(DaemonEvent::FlowStateChanged {
+                        flow: info.flow_name,
+                        state: info.state_name,
+                    });
             }
         }
         Err(message) => {
@@ -131,6 +114,48 @@ pub fn list_messages(
     state
         .conversation_store
         .list_messages(&conversation_id)
+        .map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+pub fn list_conversations(
+    state: tauri::State<'_, AppState>,
+) -> Result<Vec<ConversationSummary>, String> {
+    state
+        .conversation_store
+        .list_conversations()
+        .map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+pub fn create_conversation(
+    id: String,
+    title: String,
+    state: tauri::State<'_, AppState>,
+) -> Result<(), String> {
+    state
+        .conversation_store
+        .create_conversation(&id, &title, DEFAULT_FLOW_NAME)
+        .map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+pub fn rename_conversation(
+    id: String,
+    title: String,
+    state: tauri::State<'_, AppState>,
+) -> Result<(), String> {
+    state
+        .conversation_store
+        .rename_conversation(&id, &title)
+        .map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+pub fn delete_conversation(id: String, state: tauri::State<'_, AppState>) -> Result<(), String> {
+    state
+        .conversation_store
+        .delete_conversation(&id)
         .map_err(|e| e.to_string())
 }
 

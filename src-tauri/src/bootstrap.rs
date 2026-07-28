@@ -4,6 +4,11 @@ use core_types::workspace_paths;
 use plugin_registry::{DownloadSource, EngineEntry, ModelEntry};
 
 pub fn ensure_workspace_seeded() {
+    // Idempotent — safe to run every startup, and must: it's the only thing that picks up
+    // flow files added to the repo's flows/ directory after the very first run already seeded
+    // the registry below.
+    seed_flows();
+
     let syl_registry_dir = workspace_paths::registry_dir();
     if syl_registry_dir.join("engines.json").exists() {
         return;
@@ -39,8 +44,6 @@ pub fn ensure_workspace_seeded() {
 
     let _ = std::fs::remove_file(syl_registry_dir.join("local.engines.json"));
     let _ = std::fs::remove_file(syl_registry_dir.join("local.models.json"));
-
-    seed_flows();
 }
 
 fn seed_flows() {

@@ -16,6 +16,14 @@ impl Tool for EchoTool {
         "echo"
     }
 
+    fn description(&self) -> &str {
+        "Echoes its input back unchanged, for tests."
+    }
+
+    fn input_schema(&self) -> Value {
+        serde_json::json!({ "type": "object", "properties": {} })
+    }
+
     fn required_permission(&self) -> Permission {
         self.permission
     }

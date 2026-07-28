@@ -1,11 +1,52 @@
+use std::collections::HashMap;
 use std::sync::Mutex;
 
 use core_types::workspace_paths;
-use executor::FlowRunner;
+use executor::{FlowRunner, ToolCallSpec};
 
+/// The flow every new conversation starts on, unless the user picks a different one — its
+/// definition ships in the repo-root `flows/` directory like every other flow (see
+/// `flows/default.json`).
+pub const DEFAULT_FLOW_NAME: &str = "default";
+
+/// One `FlowRunner` per conversation — conversations run independent flow instances, not a
+/// single global flow, so switching between chats doesn't reset or share state.
 #[derive(Default)]
 pub struct FlowState {
-    pub runner: Mutex<Option<FlowRunner>>,
+    runners: Mutex<HashMap<String, FlowRunner>>,
+}
+
+/// What a chat turn needs from the active flow: the system prompt and any fixed tool call the
+/// state runs on entry. (`tool_allowlist` isn't threaded through yet — nothing consumes it
+/// until the model-driven tool-calling loop lands, at which point it decides which of the
+/// registered tools the model is allowed to choose from for this state.)
+pub struct FlowTurn {
+    pub system_prompt: String,
+    pub on_enter_tool_call: Option<ToolCallSpec>,
+}
+
+impl FlowState {
+    /// Loads the `default` flow for `conversation_id` first if it has no runner yet, then
+    /// returns the current state's turn info.
+    pub fn ensure_and_take_turn(&self, conversation_id: &str) -> Result<FlowTurn, String> {
+        let mut runners = self.runners.lock().unwrap();
+        if !runners.contains_key(conversation_id) {
+            let runner = load_flow_runner(DEFAULT_FLOW_NAME)?;
+            runners.insert(conversation_id.to_string(), runner);
+        }
+        let runner = runners.get(conversation_id).expect("just inserted above");
+        Ok(FlowTurn {
+            system_prompt: runner.current_state().system_prompt.clone(),
+            on_enter_tool_call: runner.on_enter_tool_call().cloned(),
+        })
+    }
+
+    pub fn advance(&self, conversation_id: &str, trigger: &str) -> Option<FlowStateInfo> {
+        let mut runners = self.runners.lock().unwrap();
+        let runner = runners.get_mut(conversation_id)?;
+        runner.advance(trigger);
+        Some(describe(runner))
+    }
 }
 
 #[derive(Clone, serde::Serialize)]
@@ -22,6 +63,13 @@ fn describe(runner: &FlowRunner) -> FlowStateInfo {
         state_name: runner.current_state().name.clone(),
         system_prompt: runner.current_state().system_prompt.clone(),
     }
+}
+
+fn load_flow_runner(name: &str) -> Result<FlowRunner, String> {
+    let path = workspace_paths::flows_dir().join(format!("{name}.json"));
+    let bytes = std::fs::read(&path).map_err(|e| e.to_string())?;
+    let flow = executor::parse_flow(&bytes).map_err(|e| e.to_string())?;
+    FlowRunner::new(flow).map_err(|e| e.to_string())
 }
 
 #[tauri::command]
@@ -42,24 +90,34 @@ pub fn list_flows() -> Result<Vec<String>, String> {
 
 #[tauri::command]
 pub fn load_flow(
+    conversation_id: String,
     name: String,
     state: tauri::State<'_, FlowState>,
 ) -> Result<FlowStateInfo, String> {
-    let path = workspace_paths::flows_dir().join(format!("{name}.json"));
-    let bytes = std::fs::read(&path).map_err(|e| e.to_string())?;
-    let flow = executor::parse_flow(&bytes).map_err(|e| e.to_string())?;
-    let runner = FlowRunner::new(flow).map_err(|e| e.to_string())?;
+    let runner = load_flow_runner(&name)?;
     let info = describe(&runner);
-    *state.runner.lock().unwrap() = Some(runner);
+    state
+        .runners
+        .lock()
+        .unwrap()
+        .insert(conversation_id, runner);
     Ok(info)
 }
 
 #[tauri::command]
-pub fn flow_status(state: tauri::State<'_, FlowState>) -> Option<FlowStateInfo> {
-    state.runner.lock().unwrap().as_ref().map(describe)
+pub fn flow_status(
+    conversation_id: String,
+    state: tauri::State<'_, FlowState>,
+) -> Option<FlowStateInfo> {
+    state
+        .runners
+        .lock()
+        .unwrap()
+        .get(&conversation_id)
+        .map(describe)
 }
 
 #[tauri::command]
-pub fn unload_flow(state: tauri::State<'_, FlowState>) {
-    *state.runner.lock().unwrap() = None;
+pub fn unload_flow(conversation_id: String, state: tauri::State<'_, FlowState>) {
+    state.runners.lock().unwrap().remove(&conversation_id);
 }

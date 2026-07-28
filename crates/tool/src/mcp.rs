@@ -65,6 +65,8 @@ pub struct McpToolDescriptor {
 pub struct McpToolBridge {
     qualified_name: String,
     tool_name: String,
+    description: String,
+    input_schema: serde_json::Value,
     client: std::sync::Arc<RunningService<RoleClient, ()>>,
 }
 
@@ -119,6 +121,12 @@ impl McpToolBridge {
             .map(|t| Self {
                 qualified_name: format!("mcp::{}::{}", config.name, t.name),
                 tool_name: t.name.to_string(),
+                description: t
+                    .description
+                    .as_ref()
+                    .map(|d| d.to_string())
+                    .unwrap_or_default(),
+                input_schema: serde_json::Value::Object((*t.input_schema).clone()),
                 client: client.clone(),
             })
             .collect();
@@ -133,6 +141,14 @@ impl Tool for McpToolBridge {
         // Namespaced by server name (`mcp::<server>::<tool>`) so two MCP servers can't
         // collide on a tool name inside `ToolExecutor`'s single flat tool map.
         &self.qualified_name
+    }
+
+    fn description(&self) -> &str {
+        &self.description
+    }
+
+    fn input_schema(&self) -> serde_json::Value {
+        self.input_schema.clone()
     }
 
     fn required_permission(&self) -> Permission {

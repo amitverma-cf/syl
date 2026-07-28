@@ -159,7 +159,7 @@ function App() {
     invoke<string[]>("list_flows")
       .then(setAvailableFlows)
       .catch(() => {});
-    invoke<FlowStateInfo | null>("flow_status")
+    invoke<FlowStateInfo | null>("flow_status", { conversationId: CONVERSATION_ID })
       .then(setActiveFlow)
       .catch(() => {});
   }, []);
@@ -167,7 +167,10 @@ function App() {
   async function handleLoadFlow(name: string) {
     setError(null);
     try {
-      const info = await invoke<FlowStateInfo>("load_flow", { name });
+      const info = await invoke<FlowStateInfo>("load_flow", {
+        conversationId: CONVERSATION_ID,
+        name,
+      });
       setActiveFlow(info);
     } catch (err) {
       setError(String(err));
@@ -175,7 +178,7 @@ function App() {
   }
 
   async function handleUnloadFlow() {
-    await invoke("unload_flow");
+    await invoke("unload_flow", { conversationId: CONVERSATION_ID });
     setActiveFlow(null);
   }
 
@@ -385,7 +388,7 @@ function App() {
         });
       } else if (event.type === "done") {
         setIsGenerating(false);
-        invoke<FlowStateInfo | null>("flow_status")
+        invoke<FlowStateInfo | null>("flow_status", { conversationId: CONVERSATION_ID })
           .then(setActiveFlow)
           .catch(() => {});
       } else if (event.type === "error") {

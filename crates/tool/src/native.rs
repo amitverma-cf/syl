@@ -54,6 +54,25 @@ impl Tool for ReadFileTool {
         "read_file"
     }
 
+    fn description(&self) -> &str {
+        "Read the contents of a text file in the current workspace. Call this when the user \
+         asks about, or asks you to summarize/analyze, a specific file's contents."
+    }
+
+    fn input_schema(&self) -> Value {
+        json!({
+            "type": "object",
+            "properties": {
+                "path": {
+                    "type": "string",
+                    "description": "Path to the file, relative to the workspace root."
+                }
+            },
+            "required": ["path"],
+            "additionalProperties": false
+        })
+    }
+
     fn required_permission(&self) -> Permission {
         Permission::Ask
     }
@@ -74,6 +93,29 @@ pub struct WriteFileTool {
 impl Tool for WriteFileTool {
     fn name(&self) -> &str {
         "write_file"
+    }
+
+    fn description(&self) -> &str {
+        "Write (creating or overwriting) a text file in the current workspace. Call this when \
+         the user asks you to create, save, or update a file."
+    }
+
+    fn input_schema(&self) -> Value {
+        json!({
+            "type": "object",
+            "properties": {
+                "path": {
+                    "type": "string",
+                    "description": "Path to the file, relative to the workspace root."
+                },
+                "content": {
+                    "type": "string",
+                    "description": "The full text content to write to the file."
+                }
+            },
+            "required": ["path", "content"],
+            "additionalProperties": false
+        })
     }
 
     fn required_permission(&self) -> Permission {
@@ -100,6 +142,26 @@ pub struct RunCommandTool {
 impl Tool for RunCommandTool {
     fn name(&self) -> &str {
         "run_command"
+    }
+
+    fn description(&self) -> &str {
+        "Run a shell command in the current workspace and return its stdout/stderr/exit code. \
+         Call this when the user asks you to run a build, test, script, or other shell \
+         command — do not use it for reading or writing files, which have dedicated tools."
+    }
+
+    fn input_schema(&self) -> Value {
+        json!({
+            "type": "object",
+            "properties": {
+                "command": {
+                    "type": "string",
+                    "description": "The shell command to run."
+                }
+            },
+            "required": ["command"],
+            "additionalProperties": false
+        })
     }
 
     fn required_permission(&self) -> Permission {

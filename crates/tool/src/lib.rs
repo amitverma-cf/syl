@@ -41,8 +41,26 @@ pub enum Permission {
 #[async_trait]
 pub trait Tool: Send + Sync {
     fn name(&self) -> &str;
+    /// A model-facing description of what the tool does — this is what a real tool-calling
+    /// model uses to decide *when* to call it, so it should be prescriptive ("call this when
+    /// the user asks to read a file"), not just descriptive.
+    fn description(&self) -> &str;
+    /// JSON Schema for the tool's arguments (`{"type": "object", "properties": {...}}`) — fed
+    /// to whichever tool-calling mechanism the active model uses (native for cloud/custom
+    /// providers via `genai`, prompt-embedded for local models).
+    fn input_schema(&self) -> serde_json::Value;
     fn required_permission(&self) -> Permission;
     async fn call(&self, args: serde_json::Value) -> Result<serde_json::Value, ToolError>;
+}
+
+/// A tool's model-facing shape (name/description/schema), independent of any particular
+/// `Tool` instance — what a tool-calling loop needs to hand to a model.
+#[derive(Debug, Clone, serde::Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ToolSpec {
+    pub name: String,
+    pub description: String,
+    pub input_schema: serde_json::Value,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
@@ -101,6 +119,35 @@ impl ToolExecutor {
 
     pub fn tool_names(&self) -> Vec<String> {
         self.tools.read().unwrap().keys().cloned().collect()
+    }
+
+    /// Model-facing specs for every registered tool — what a tool-calling loop hands to the
+    /// model so it can decide which tool, if any, to call.
+    pub fn tool_specs(&self) -> Vec<ToolSpec> {
+        self.tools
+            .read()
+            .unwrap()
+            .values()
+            .map(|tool| ToolSpec {
+                name: tool.name().to_string(),
+                description: tool.description().to_string(),
+                input_schema: tool.input_schema(),
+            })
+            .collect()
+    }
+
+    /// Same as [`Self::tool_specs`], but scoped to a flow state's `tool_allowlist` — an empty
+    /// allowlist means "no restriction" (every registered tool is allowed), matching the
+    /// `default` flow's intent of giving the assistant everything available.
+    pub fn tool_specs_filtered(&self, allowlist: &[String]) -> Vec<ToolSpec> {
+        let specs = self.tool_specs();
+        if allowlist.is_empty() {
+            return specs;
+        }
+        specs
+            .into_iter()
+            .filter(|spec| allowlist.iter().any(|name| name == &spec.name))
+            .collect()
     }
 
     pub async fn call(
