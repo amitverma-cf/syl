@@ -1,113 +1,82 @@
-//! Loads the engine plugin and model catalog listings, and resolves each listing's
-//! download URL to a location the rest of the app can read from.
-
 use std::path::{Path, PathBuf};
 
 use serde::{Deserialize, Serialize};
 
-/// An error returned by this crate.
 #[derive(Debug, thiserror::Error)]
 pub enum PluginRegistryError {
-    /// A registry file could not be read from disk.
     #[error("failed to read registry file {path}: {source}")]
     Io {
-        /// The file that could not be read.
         path: PathBuf,
-        /// The underlying I/O error.
         #[source]
         source: std::io::Error,
     },
-    /// A registry file's contents were not valid JSON, or did not match the expected shape.
     #[error("failed to parse registry file {path}: {source}")]
     Parse {
-        /// The file that failed to parse.
         path: PathBuf,
-        /// The underlying parse error.
         #[source]
         source: serde_json::Error,
     },
-    /// A download URL did not use a supported scheme (`file://`, `http://`, `https://`).
     #[error("unsupported or malformed download URL: {0}")]
     InvalidUrl(String),
-    /// A `file://` URL pointed at a path that does not exist.
     #[error("local file does not exist: {}", .0.display())]
     LocalFileMissing(PathBuf),
-    /// A `http://`/`https://` URL was resolved, but downloading it is not implemented yet.
     #[error("remote downloads are not implemented yet: {0}")]
     RemoteNotImplemented(String),
 }
 
-/// One entry in the engine plugin listing: a downloadable build of an inference engine.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct EngineEntry {
-    /// The engine's unique id.
     pub id: String,
-    /// The version of this build.
     pub version: String,
-    /// The target platform this build runs on (e.g. `windows-x64-cuda`).
     pub platform: String,
-    /// Where to obtain this build: a `file://` path for local development, or an
-    /// `http://`/`https://` URL once builds are hosted.
     pub download_url: String,
-    /// SHA-256 hash of the downloaded file, for integrity verification. Not required for
-    /// `file://` sources, since those are already local and trusted.
     pub sha256: Option<String>,
 }
 
-/// One entry in the model catalog: a model available to download and run.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ModelEntry {
-    /// The model's display name.
     pub name: String,
-    /// The download size, in bytes.
     pub size_bytes: u64,
-    /// The quantization variant of this listing (e.g. `Q4_K_M`).
     pub quantization: String,
-    /// The id of the engine required to run this model.
     pub required_engine: String,
-    /// Where to obtain this model: a `file://` path for local development, or a Hugging Face
-    /// `https://` URL once models are catalogued for download.
-    pub huggingface_url: String,
-    /// SHA-256 hash of the downloaded file, for integrity verification. Not required for
-    /// `file://` sources, since those are already local and trusted.
+    pub download_url: String,
     pub sha256: Option<String>,
 }
 
-/// Where a resolved download URL points to.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum DownloadSource {
-    /// The file already exists at this path on the local filesystem.
     Local(PathBuf),
-    /// The file must be downloaded from this URL.
     Remote(String),
 }
 
-/// Loads `engines.json` from `registry_dir`, merged with `local.engines.json` if present.
-///
-/// # Errors
-/// Returns an error if `engines.json` is missing or fails to parse, or if a present
-/// `local.engines.json` fails to parse.
 pub fn load_engine_entries(registry_dir: &Path) -> Result<Vec<EngineEntry>, PluginRegistryError> {
     let mut entries = load_json_array(&registry_dir.join("engines.json"))?;
-    let local_path = registry_dir.join("local.engines.json");
-    if local_path.exists() {
-        entries.extend(load_json_array::<EngineEntry>(&local_path)?);
-    }
+    entries.extend(load_local_engine_entries(registry_dir)?);
     Ok(entries)
 }
 
-/// Loads `models.json` from `registry_dir`, merged with `local.models.json` if present.
-///
-/// # Errors
-/// Returns an error if `models.json` is missing or fails to parse, or if a present
-/// `local.models.json` fails to parse.
 pub fn load_model_entries(registry_dir: &Path) -> Result<Vec<ModelEntry>, PluginRegistryError> {
     let mut entries = load_json_array(&registry_dir.join("models.json"))?;
-    let local_path = registry_dir.join("local.models.json");
-    if local_path.exists() {
-        entries.extend(load_json_array::<ModelEntry>(&local_path)?);
-    }
+    entries.extend(load_local_model_entries(registry_dir)?);
     Ok(entries)
+}
+
+pub fn load_local_engine_entries(dir: &Path) -> Result<Vec<EngineEntry>, PluginRegistryError> {
+    let path = dir.join("local.engines.json");
+    if path.exists() {
+        load_json_array(&path)
+    } else {
+        Ok(Vec::new())
+    }
+}
+
+pub fn load_local_model_entries(dir: &Path) -> Result<Vec<ModelEntry>, PluginRegistryError> {
+    let path = dir.join("local.models.json");
+    if path.exists() {
+        load_json_array(&path)
+    } else {
+        Ok(Vec::new())
+    }
 }
 
 fn load_json_array<T: for<'de> Deserialize<'de>>(
@@ -123,13 +92,6 @@ fn load_json_array<T: for<'de> Deserialize<'de>>(
     })
 }
 
-/// Resolves a download URL to either a local path (`file://`) or a remote URL
-/// (`http://`/`https://`).
-///
-/// # Errors
-/// Returns [`PluginRegistryError::InvalidUrl`] if `url` uses an unsupported scheme, or
-/// [`PluginRegistryError::LocalFileMissing`] if a `file://` URL points at a path that does
-/// not exist.
 pub fn resolve_download_url(url: &str) -> Result<DownloadSource, PluginRegistryError> {
     if let Some(raw_path) = url.strip_prefix("file://") {
         let path = PathBuf::from(file_url_path_to_native(raw_path));
@@ -144,11 +106,6 @@ pub fn resolve_download_url(url: &str) -> Result<DownloadSource, PluginRegistryE
     }
 }
 
-/// Resolves `url` to a local path ready to use immediately.
-///
-/// # Errors
-/// Returns an error if `url` does not resolve to a local file, or if it resolves to a remote
-/// URL (remote downloading is not implemented yet).
 pub fn resolve_local_path(url: &str) -> Result<PathBuf, PluginRegistryError> {
     match resolve_download_url(url)? {
         DownloadSource::Local(path) => Ok(path),
@@ -156,11 +113,8 @@ pub fn resolve_local_path(url: &str) -> Result<PathBuf, PluginRegistryError> {
     }
 }
 
-/// Converts the path component of a `file://` URL to a native filesystem path string.
 fn file_url_path_to_native(raw_path: &str) -> String {
     let trimmed = raw_path.strip_prefix('/').unwrap_or(raw_path);
-    // A Windows drive-letter path (e.g. "C:/Users/...") must not keep its leading slash;
-    // any other absolute path must.
     if trimmed.as_bytes().get(1) == Some(&b':') {
         trimmed.to_string()
     } else {

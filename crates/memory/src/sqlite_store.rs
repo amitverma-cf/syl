@@ -1,5 +1,3 @@
-//! SQLite-backed [`ConversationStore`] implementation.
-
 use std::path::Path;
 use std::sync::Mutex;
 
@@ -7,16 +5,11 @@ use rusqlite::Connection;
 
 use crate::{ConversationStore, MemoryError, Message};
 
-/// A [`ConversationStore`] backed by a single SQLite database file.
 pub struct SqliteConversationStore {
     conn: Mutex<Connection>,
 }
 
 impl SqliteConversationStore {
-    /// Opens the database at `db_path`, creating the schema if it doesn't already exist.
-    ///
-    /// # Errors
-    /// Returns an error if the database can't be opened or the schema can't be created.
     pub fn open(db_path: &Path) -> Result<Self, MemoryError> {
         let conn = Connection::open(db_path)?;
         conn.execute_batch(

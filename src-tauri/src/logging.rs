@@ -1,12 +1,6 @@
-//! Structured logging setup: human-readable output to the console, plus a persisted,
-//! daily-rotated log file so behavior can be inspected after the app window has closed.
-
 use tracing_appender::non_blocking::WorkerGuard;
 use tracing_subscriber::fmt::writer::MakeWriterExt;
 
-/// Initializes the global tracing subscriber. The returned [`WorkerGuard`] must be kept alive
-/// for the lifetime of the app — dropping it stops the background thread that flushes log
-/// lines to disk, silently truncating anything not yet written.
 pub fn init() -> WorkerGuard {
     let log_dir = core_types::workspace_paths::logs_dir();
     let file_appender = tracing_appender::rolling::daily(&log_dir, "syl.log");

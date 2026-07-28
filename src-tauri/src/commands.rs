@@ -1,5 +1,3 @@
-//! Tauri commands exposed to the frontend.
-
 use std::sync::Arc;
 
 use core_types::workspace_paths;
@@ -9,21 +7,16 @@ use tauri::ipc::Channel;
 
 use crate::AppState;
 
-/// One message sent to the frontend while a generation request is in progress.
+const CHAT_MODEL_NAME: &str = "Qwen3.5-0.8B-Q4_K_M";
+
 #[derive(Clone, serde::Serialize)]
 #[serde(rename_all = "camelCase", tag = "type")]
 pub enum GenerationEvent {
-    /// A piece of generated text.
     Piece { text: String },
-    /// Generation finished successfully.
     Done,
-    /// Generation failed.
     Error { message: String },
 }
 
-/// Runs one generation call for `prompt` in `conversation_id` against the locally configured
-/// llama.cpp engine and model, streaming each generated piece of text to `on_event`. The
-/// prompt and the full response are persisted to the conversation store.
 #[tauri::command]
 #[tracing::instrument(skip(on_event, state))]
 pub async fn generate(
@@ -48,7 +41,6 @@ pub async fn generate(
     .map_err(|e| e.to_string())
 }
 
-/// Returns every message stored for `conversation_id`, oldest first.
 #[tauri::command]
 pub fn list_messages(
     conversation_id: String,
@@ -84,13 +76,9 @@ fn run_generate(
     let models = plugin_registry::load_model_entries(&registry_dir).map_err(|e| e.to_string())?;
     let model_entry = models
         .iter()
-        .find(|m| {
-            m.required_engine == "llama-cpp"
-                && !m.name.to_lowercase().contains("embed")
-                && !m.name.to_lowercase().contains("minilm")
-        })
+        .find(|m| m.name == CHAT_MODEL_NAME)
         .ok_or_else(|| "no chat model entry in .syl/registry/models.json".to_string())?;
-    let model_path = plugin_registry::resolve_local_path(&model_entry.huggingface_url)
+    let model_path = plugin_registry::resolve_local_path(&model_entry.download_url)
         .map_err(|e| e.to_string())?;
 
     let mut engine =

@@ -1,38 +1,41 @@
-//! One-time setup that seeds the local `.syl` workspace (engines, models, registry) the first
-//! time the app runs, from whatever the repo-relative dev registry currently points at.
-
 use std::path::{Path, PathBuf};
 
 use core_types::workspace_paths;
 use plugin_registry::{EngineEntry, ModelEntry};
 
-/// Populates `.syl/engines/`, `.syl/models/`, and `.syl/registry/` from the repo-relative
-/// `registry/` folder (including any local dev overrides) if `.syl/registry/engines.json`
-/// doesn't already exist. A no-op on subsequent runs.
 pub fn ensure_workspace_seeded() {
-    let registry_dir = workspace_paths::registry_dir();
-    if registry_dir.join("engines.json").exists() {
+    let syl_registry_dir = workspace_paths::registry_dir();
+    if syl_registry_dir.join("engines.json").exists() {
         return;
     }
 
     tracing::info!(dir = %workspace_paths::workspace_root().display(), "seeding local .syl workspace");
 
-    let source_registry_dir = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../registry");
-    let source_engines =
-        plugin_registry::load_engine_entries(&source_registry_dir).unwrap_or_default();
-    let source_models =
-        plugin_registry::load_model_entries(&source_registry_dir).unwrap_or_default();
+    let repo_registry_dir = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../registry");
+    let base_engines = plugin_registry::load_engine_entries(&repo_registry_dir).unwrap_or_default();
+    let base_models = plugin_registry::load_model_entries(&repo_registry_dir).unwrap_or_default();
+    let local_engines =
+        plugin_registry::load_local_engine_entries(&syl_registry_dir).unwrap_or_default();
+    let local_models =
+        plugin_registry::load_local_model_entries(&syl_registry_dir).unwrap_or_default();
 
-    let seeded_engines: Vec<EngineEntry> =
-        source_engines.into_iter().filter_map(seed_engine).collect();
-    let seeded_models: Vec<ModelEntry> = source_models.into_iter().filter_map(seed_model).collect();
+    let seeded_engines: Vec<EngineEntry> = base_engines
+        .into_iter()
+        .chain(local_engines)
+        .filter_map(seed_engine)
+        .collect();
+    let seeded_models: Vec<ModelEntry> = base_models
+        .into_iter()
+        .chain(local_models)
+        .filter_map(seed_model)
+        .collect();
 
-    if let Err(err) = std::fs::create_dir_all(&registry_dir) {
+    if let Err(err) = std::fs::create_dir_all(&syl_registry_dir) {
         tracing::error!(?err, "failed to create .syl/registry");
         return;
     }
-    write_json(&registry_dir.join("engines.json"), &seeded_engines);
-    write_json(&registry_dir.join("models.json"), &seeded_models);
+    write_json(&syl_registry_dir.join("engines.json"), &seeded_engines);
+    write_json(&syl_registry_dir.join("models.json"), &seeded_models);
 }
 
 fn seed_engine(entry: EngineEntry) -> Option<EngineEntry> {
@@ -59,7 +62,7 @@ fn seed_engine(entry: EngineEntry) -> Option<EngineEntry> {
 }
 
 fn seed_model(entry: ModelEntry) -> Option<ModelEntry> {
-    let source_path = match plugin_registry::resolve_local_path(&entry.huggingface_url) {
+    let source_path = match plugin_registry::resolve_local_path(&entry.download_url) {
         Ok(path) => path,
         Err(err) => {
             tracing::warn!(?err, model = %entry.name, "skipping model seed, source not resolvable");
@@ -80,7 +83,7 @@ fn seed_model(entry: ModelEntry) -> Option<ModelEntry> {
     }
 
     Some(ModelEntry {
-        huggingface_url: file_url(&dest_path),
+        download_url: file_url(&dest_path),
         ..entry
     })
 }

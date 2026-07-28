@@ -7,7 +7,6 @@ use std::sync::Arc;
 use core_types::workspace_paths;
 use memory::SqliteConversationStore;
 
-/// Shared app state available to every Tauri command.
 pub struct AppState {
     pub conversation_store: Arc<SqliteConversationStore>,
 }
