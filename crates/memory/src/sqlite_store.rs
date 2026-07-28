@@ -4,7 +4,7 @@ use std::sync::Mutex;
 use rusqlite::Connection;
 
 use crate::{
-    ConversationStore, EmbeddingMatch, EmbeddingStore, MemoryError, Message,
+    ConversationStore, ConversationSummary, EmbeddingMatch, EmbeddingStore, MemoryError, Message,
     ToolPermissionDecision, ToolPermissionStore,
 };
 
@@ -36,6 +36,13 @@ const SCHEMA: &str = "
         tool_name       TEXT NOT NULL,
         decision        TEXT NOT NULL,
         PRIMARY KEY (conversation_id, tool_name)
+    );
+    CREATE TABLE IF NOT EXISTS conversations (
+        id         TEXT PRIMARY KEY,
+        title      TEXT NOT NULL,
+        flow_name  TEXT NOT NULL,
+        created_at INTEGER NOT NULL,
+        updated_at INTEGER NOT NULL
     );
 ";
 
@@ -104,6 +111,101 @@ impl ConversationStore for SqliteConversationStore {
             messages.push(row?);
         }
         Ok(messages)
+    }
+
+    fn create_conversation(
+        &self,
+        id: &str,
+        title: &str,
+        flow_name: &str,
+    ) -> Result<(), MemoryError> {
+        let now = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap_or_default()
+            .as_secs() as i64;
+        let conn = self
+            .conn
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
+        conn.execute(
+            "INSERT INTO conversations (id, title, flow_name, created_at, updated_at)
+             VALUES (?1, ?2, ?3, ?4, ?4)",
+            (id, title, flow_name, now),
+        )?;
+        Ok(())
+    }
+
+    fn list_conversations(&self) -> Result<Vec<ConversationSummary>, MemoryError> {
+        let conn = self
+            .conn
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
+        let mut stmt = conn.prepare(
+            "SELECT id, title, flow_name, created_at, updated_at FROM conversations
+             ORDER BY updated_at DESC",
+        )?;
+        let rows = stmt.query_map((), |row| {
+            Ok(ConversationSummary {
+                id: row.get(0)?,
+                title: row.get(1)?,
+                flow_name: row.get(2)?,
+                created_at: row.get(3)?,
+                updated_at: row.get(4)?,
+            })
+        })?;
+
+        let mut conversations = Vec::new();
+        for row in rows {
+            conversations.push(row?);
+        }
+        Ok(conversations)
+    }
+
+    fn rename_conversation(&self, id: &str, title: &str) -> Result<(), MemoryError> {
+        let now = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap_or_default()
+            .as_secs() as i64;
+        let conn = self
+            .conn
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
+        conn.execute(
+            "UPDATE conversations SET title = ?2, updated_at = ?3 WHERE id = ?1",
+            (id, title, now),
+        )?;
+        Ok(())
+    }
+
+    fn set_conversation_flow(&self, id: &str, flow_name: &str) -> Result<(), MemoryError> {
+        let now = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap_or_default()
+            .as_secs() as i64;
+        let conn = self
+            .conn
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
+        conn.execute(
+            "UPDATE conversations SET flow_name = ?2, updated_at = ?3 WHERE id = ?1",
+            (id, flow_name, now),
+        )?;
+        Ok(())
+    }
+
+    fn delete_conversation(&self, id: &str) -> Result<(), MemoryError> {
+        let conn = self
+            .conn
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
+        conn.execute("DELETE FROM conversations WHERE id = ?1", (id,))?;
+        conn.execute("DELETE FROM messages WHERE conversation_id = ?1", (id,))?;
+        conn.execute("DELETE FROM embeddings WHERE conversation_id = ?1", (id,))?;
+        conn.execute(
+            "DELETE FROM tool_permissions WHERE conversation_id = ?1",
+            (id,),
+        )?;
+        Ok(())
     }
 }
 

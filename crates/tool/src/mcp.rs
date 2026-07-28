@@ -1,16 +1,36 @@
 use rmcp::model::CallToolRequestParams;
 use rmcp::service::RunningService;
-use rmcp::transport::{ConfigureCommandExt, TokioChildProcess};
+use rmcp::transport::streamable_http_client::StreamableHttpClientTransportConfig;
+use rmcp::transport::{ConfigureCommandExt, StreamableHttpClientTransport, TokioChildProcess};
 use rmcp::{RoleClient, ServiceExt};
 
 use crate::{Permission, Tool, ToolError};
 
+/// A connected MCP server can be local (spawned as a stdio child process — most desktop MCP
+/// servers) or remote (Streamable HTTP, the current MCP transport for hosted servers like
+/// Linear, GitHub, Notion, etc. — the old separate "SSE transport" is superseded by this).
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+#[serde(rename_all = "camelCase", tag = "transport")]
+pub enum McpTransportConfig {
+    #[serde(rename = "stdio")]
+    Stdio {
+        command: String,
+        #[serde(default)]
+        args: Vec<String>,
+    },
+    #[serde(rename = "http")]
+    Http {
+        url: String,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        bearer_token: Option<String>,
+    },
+}
+
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct McpServerConfig {
     pub name: String,
-    pub command: String,
-    #[serde(default)]
-    pub args: Vec<String>,
+    #[serde(flatten)]
+    pub transport: McpTransportConfig,
 }
 
 pub fn load_mcp_servers(path: &std::path::Path) -> Vec<McpServerConfig> {
@@ -45,26 +65,41 @@ pub struct McpToolDescriptor {
 pub struct McpToolBridge {
     qualified_name: String,
     tool_name: String,
+    description: String,
+    input_schema: serde_json::Value,
     client: std::sync::Arc<RunningService<RoleClient, ()>>,
 }
 
 impl McpToolBridge {
-    /// Connects to an MCP server over stdio (spawning `command args...` as a child process)
-    /// and returns one bridge per tool the server advertises, plus their schemas for display.
+    /// Connects to an MCP server — over stdio (spawning `command args...` as a child process)
+    /// or over Streamable HTTP (the current MCP transport for remote/hosted servers) depending
+    /// on `config.transport` — and returns one bridge per tool the server advertises, plus
+    /// their schemas for display.
     pub async fn connect(
         config: &McpServerConfig,
     ) -> Result<(Vec<Self>, Vec<McpToolDescriptor>), ToolError> {
-        let transport = TokioChildProcess::new(
-            tokio::process::Command::new(&config.command).configure(|cmd| {
-                cmd.args(&config.args);
-            }),
-        )
-        .map_err(|e| ToolError::Execution(format!("failed to spawn MCP server: {e}")))?;
-
-        let client = ()
-            .serve(transport)
-            .await
-            .map_err(|e| ToolError::Execution(format!("failed to connect to MCP server: {e}")))?;
+        let client: RunningService<RoleClient, ()> = match &config.transport {
+            McpTransportConfig::Stdio { command, args } => {
+                let transport = TokioChildProcess::new(
+                    tokio::process::Command::new(command).configure(|cmd| {
+                        cmd.args(args);
+                    }),
+                )
+                .map_err(|e| ToolError::Execution(format!("failed to spawn MCP server: {e}")))?;
+                ().serve(transport).await.map_err(|e| {
+                    ToolError::Execution(format!("failed to connect to MCP server: {e}"))
+                })?
+            }
+            McpTransportConfig::Http { url, bearer_token } => {
+                let mut http_config = StreamableHttpClientTransportConfig::default();
+                http_config.uri = url.clone().into();
+                http_config.auth_header = bearer_token.clone();
+                let transport = StreamableHttpClientTransport::from_config(http_config);
+                ().serve(transport).await.map_err(|e| {
+                    ToolError::Execution(format!("failed to connect to MCP server: {e}"))
+                })?
+            }
+        };
         let client = std::sync::Arc::new(client);
 
         let tools = client
@@ -86,6 +121,12 @@ impl McpToolBridge {
             .map(|t| Self {
                 qualified_name: format!("mcp::{}::{}", config.name, t.name),
                 tool_name: t.name.to_string(),
+                description: t
+                    .description
+                    .as_ref()
+                    .map(|d| d.to_string())
+                    .unwrap_or_default(),
+                input_schema: serde_json::Value::Object((*t.input_schema).clone()),
                 client: client.clone(),
             })
             .collect();
@@ -100,6 +141,14 @@ impl Tool for McpToolBridge {
         // Namespaced by server name (`mcp::<server>::<tool>`) so two MCP servers can't
         // collide on a tool name inside `ToolExecutor`'s single flat tool map.
         &self.qualified_name
+    }
+
+    fn description(&self) -> &str {
+        &self.description
+    }
+
+    fn input_schema(&self) -> serde_json::Value {
+        self.input_schema.clone()
     }
 
     fn required_permission(&self) -> Permission {

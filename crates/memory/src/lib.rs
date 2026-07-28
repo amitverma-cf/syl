@@ -25,6 +25,16 @@ pub struct Message {
     pub created_at: i64,
 }
 
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ConversationSummary {
+    pub id: String,
+    pub title: String,
+    pub flow_name: String,
+    pub created_at: i64,
+    pub updated_at: i64,
+}
+
 #[derive(Debug, Clone, PartialEq, serde::Serialize, serde::Deserialize)]
 pub struct EmbeddingMatch {
     pub content: String,
@@ -40,6 +50,21 @@ pub trait ConversationStore: Send + Sync {
     ) -> Result<(), MemoryError>;
 
     fn list_messages(&self, conversation_id: &str) -> Result<Vec<Message>, MemoryError>;
+
+    fn create_conversation(
+        &self,
+        id: &str,
+        title: &str,
+        flow_name: &str,
+    ) -> Result<(), MemoryError>;
+
+    fn list_conversations(&self) -> Result<Vec<ConversationSummary>, MemoryError>;
+
+    fn rename_conversation(&self, id: &str, title: &str) -> Result<(), MemoryError>;
+
+    fn set_conversation_flow(&self, id: &str, flow_name: &str) -> Result<(), MemoryError>;
+
+    fn delete_conversation(&self, id: &str) -> Result<(), MemoryError>;
 }
 
 pub trait EmbeddingStore: Send + Sync {

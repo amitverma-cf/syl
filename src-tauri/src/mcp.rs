@@ -3,7 +3,7 @@ use std::sync::Mutex;
 
 use core_types::workspace_paths;
 use tauri::Manager;
-use tool::{McpServerConfig, McpToolBridge, McpToolDescriptor, Tool};
+use tool::{McpServerConfig, McpToolBridge, McpToolDescriptor, McpTransportConfig, Tool};
 
 use crate::ToolState;
 
@@ -23,15 +23,13 @@ pub fn list_mcp_servers() -> Vec<McpServerConfig> {
 #[tauri::command]
 pub async fn add_mcp_server(
     name: String,
-    command: String,
-    args: Vec<String>,
+    transport: McpTransportConfig,
     tool_state: tauri::State<'_, ToolState>,
     mcp_state: tauri::State<'_, McpState>,
 ) -> Result<Vec<McpToolDescriptor>, String> {
     let config = McpServerConfig {
         name: name.clone(),
-        command,
-        args,
+        transport,
     };
     let (bridges, descriptors) = McpToolBridge::connect(&config)
         .await

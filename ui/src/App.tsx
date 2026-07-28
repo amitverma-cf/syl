@@ -63,10 +63,13 @@ interface CustomProviderConfig {
   models: string[];
 }
 
+type McpTransportConfig =
+  | { transport: "stdio"; command: string; args: string[] }
+  | { transport: "http"; url: string; bearerToken?: string | null };
+
 interface McpServerConfig {
   name: string;
-  command: string;
-  args: string[];
+  transport: McpTransportConfig;
 }
 
 interface McpToolDescriptor {
@@ -118,9 +121,12 @@ function App() {
   const [addingProvider, setAddingProvider] = useState(false);
 
   const [mcpServers, setMcpServers] = useState<McpServerConfig[]>([]);
+  const [newMcpTransport, setNewMcpTransport] = useState<"stdio" | "http">("stdio");
   const [newMcpName, setNewMcpName] = useState("");
   const [newMcpCommand, setNewMcpCommand] = useState("");
   const [newMcpArgs, setNewMcpArgs] = useState("");
+  const [newMcpUrl, setNewMcpUrl] = useState("");
+  const [newMcpBearerToken, setNewMcpBearerToken] = useState("");
   const [addingMcpServer, setAddingMcpServer] = useState(false);
   const [mcpTools, setMcpTools] = useState<Record<string, McpToolDescriptor[]>>({});
 
@@ -153,7 +159,7 @@ function App() {
     invoke<string[]>("list_flows")
       .then(setAvailableFlows)
       .catch(() => {});
-    invoke<FlowStateInfo | null>("flow_status")
+    invoke<FlowStateInfo | null>("flow_status", { conversationId: CONVERSATION_ID })
       .then(setActiveFlow)
       .catch(() => {});
   }, []);
@@ -161,7 +167,10 @@ function App() {
   async function handleLoadFlow(name: string) {
     setError(null);
     try {
-      const info = await invoke<FlowStateInfo>("load_flow", { name });
+      const info = await invoke<FlowStateInfo>("load_flow", {
+        conversationId: CONVERSATION_ID,
+        name,
+      });
       setActiveFlow(info);
     } catch (err) {
       setError(String(err));
@@ -169,7 +178,7 @@ function App() {
   }
 
   async function handleUnloadFlow() {
-    await invoke("unload_flow");
+    await invoke("unload_flow", { conversationId: CONVERSATION_ID });
     setActiveFlow(null);
   }
 
@@ -254,20 +263,34 @@ function App() {
 
   async function handleAddMcpServer(e: React.FormEvent) {
     e.preventDefault();
-    if (!newMcpName.trim() || !newMcpCommand.trim()) return;
+    if (!newMcpName.trim()) return;
+    if (newMcpTransport === "stdio" && !newMcpCommand.trim()) return;
+    if (newMcpTransport === "http" && !newMcpUrl.trim()) return;
     setAddingMcpServer(true);
     setError(null);
     try {
-      const args = newMcpArgs.trim().length > 0 ? newMcpArgs.trim().split(/\s+/) : [];
+      const transport: McpTransportConfig =
+        newMcpTransport === "stdio"
+          ? {
+              transport: "stdio",
+              command: newMcpCommand.trim(),
+              args: newMcpArgs.trim().length > 0 ? newMcpArgs.trim().split(/\s+/) : [],
+            }
+          : {
+              transport: "http",
+              url: newMcpUrl.trim(),
+              bearerToken: newMcpBearerToken.trim() || null,
+            };
       const tools = await invoke<McpToolDescriptor[]>("add_mcp_server", {
         name: newMcpName.trim(),
-        command: newMcpCommand.trim(),
-        args,
+        transport,
       });
       setMcpTools((prev) => ({ ...prev, [newMcpName.trim()]: tools }));
       setNewMcpName("");
       setNewMcpCommand("");
       setNewMcpArgs("");
+      setNewMcpUrl("");
+      setNewMcpBearerToken("");
       refreshMcpServers();
     } catch (err) {
       setError(String(err));
@@ -365,7 +388,7 @@ function App() {
         });
       } else if (event.type === "done") {
         setIsGenerating(false);
-        invoke<FlowStateInfo | null>("flow_status")
+        invoke<FlowStateInfo | null>("flow_status", { conversationId: CONVERSATION_ID })
           .then(setActiveFlow)
           .catch(() => {});
       } else if (event.type === "error") {
@@ -479,25 +502,53 @@ function App() {
           ))}
 
           <span className="mt-2 text-sm font-medium">MCP servers</span>
-          <form onSubmit={handleAddMcpServer} className="flex flex-wrap gap-2">
+          <form onSubmit={handleAddMcpServer} className="flex flex-wrap items-center gap-2">
+            <select
+              value={newMcpTransport}
+              onChange={(e) => setNewMcpTransport(e.currentTarget.value as "stdio" | "http")}
+              className="rounded border border-neutral-700 bg-neutral-900 px-2 py-1 text-sm"
+            >
+              <option value="stdio">Local (stdio)</option>
+              <option value="http">Remote (HTTP)</option>
+            </select>
             <input
               value={newMcpName}
               onChange={(e) => setNewMcpName(e.currentTarget.value)}
               placeholder="Name"
               className="w-32 rounded border border-neutral-700 bg-neutral-900 px-2 py-1 text-sm"
             />
-            <input
-              value={newMcpCommand}
-              onChange={(e) => setNewMcpCommand(e.currentTarget.value)}
-              placeholder="Command (e.g. npx)"
-              className="w-32 rounded border border-neutral-700 bg-neutral-900 px-2 py-1 text-sm"
-            />
-            <input
-              value={newMcpArgs}
-              onChange={(e) => setNewMcpArgs(e.currentTarget.value)}
-              placeholder="Args (space-separated)"
-              className="flex-1 rounded border border-neutral-700 bg-neutral-900 px-2 py-1 text-sm"
-            />
+            {newMcpTransport === "stdio" ? (
+              <>
+                <input
+                  value={newMcpCommand}
+                  onChange={(e) => setNewMcpCommand(e.currentTarget.value)}
+                  placeholder="Command (e.g. npx)"
+                  className="w-32 rounded border border-neutral-700 bg-neutral-900 px-2 py-1 text-sm"
+                />
+                <input
+                  value={newMcpArgs}
+                  onChange={(e) => setNewMcpArgs(e.currentTarget.value)}
+                  placeholder="Args (space-separated)"
+                  className="flex-1 rounded border border-neutral-700 bg-neutral-900 px-2 py-1 text-sm"
+                />
+              </>
+            ) : (
+              <>
+                <input
+                  value={newMcpUrl}
+                  onChange={(e) => setNewMcpUrl(e.currentTarget.value)}
+                  placeholder="Server URL (Streamable HTTP)"
+                  className="flex-1 rounded border border-neutral-700 bg-neutral-900 px-2 py-1 text-sm"
+                />
+                <input
+                  type="password"
+                  value={newMcpBearerToken}
+                  onChange={(e) => setNewMcpBearerToken(e.currentTarget.value)}
+                  placeholder="Bearer token (optional)"
+                  className="w-40 rounded border border-neutral-700 bg-neutral-900 px-2 py-1 text-sm"
+                />
+              </>
+            )}
             <button
               type="submit"
               disabled={addingMcpServer}
@@ -513,8 +564,10 @@ function App() {
             >
               <div className="flex items-center justify-between">
                 <span>
-                  <span className="font-mono text-neutral-200">{s.name}</span> — {s.command}{" "}
-                  {s.args.join(" ")}
+                  <span className="font-mono text-neutral-200">{s.name}</span> —{" "}
+                  {s.transport.transport === "stdio"
+                    ? `${s.transport.command} ${s.transport.args.join(" ")}`
+                    : s.transport.url}
                 </span>
                 <button
                   onClick={() => handleRemoveMcpServer(s.name)}

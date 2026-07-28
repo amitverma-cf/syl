@@ -116,6 +116,10 @@ pub fn run() {
         .invoke_handler(tauri::generate_handler![
             commands::generate,
             commands::list_messages,
+            commands::list_conversations,
+            commands::create_conversation,
+            commands::rename_conversation,
+            commands::delete_conversation,
             commands::call_tool,
             commands::respond_permission,
             models::list_available_models,
