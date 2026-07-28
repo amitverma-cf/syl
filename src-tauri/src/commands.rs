@@ -3,11 +3,10 @@ use std::sync::Arc;
 use core_types::workspace_paths;
 use engine_host::llama::LlamaEngine;
 use memory::{ConversationStore, Message, SqliteConversationStore};
+use plugin_registry::ModelKind;
 use tauri::ipc::Channel;
 
 use crate::{AppState, ToolState};
-
-const CHAT_MODEL_NAME: &str = "Qwen3.5-0.8B-Q4_K_M";
 
 #[derive(Clone, serde::Serialize)]
 #[serde(rename_all = "camelCase", tag = "type")]
@@ -86,26 +85,21 @@ fn run_generate(
         .append_message(conversation_id, "user", prompt)
         .map_err(|e| e.to_string())?;
 
-    let registry_dir = workspace_paths::registry_dir();
+    let resolved = plugin_registry::resolve_model_for_kind(
+        &workspace_paths::registry_dir(),
+        &workspace_paths::models_dir(),
+        &workspace_paths::engines_dir(),
+        ModelKind::Chat,
+    )
+    .map_err(|e| e.to_string())?;
 
-    let engines = plugin_registry::load_engine_entries(&registry_dir).map_err(|e| e.to_string())?;
-    let engine_entry = engines
-        .iter()
-        .find(|e| e.id == "llama-cpp")
-        .ok_or_else(|| "no llama-cpp entry in .syl/registry/engines.json".to_string())?;
-    let library_path = plugin_registry::resolve_local_path(&engine_entry.download_url)
-        .map_err(|e| e.to_string())?;
-
-    let models = plugin_registry::load_model_entries(&registry_dir).map_err(|e| e.to_string())?;
-    let model_entry = models
-        .iter()
-        .find(|m| m.name == CHAT_MODEL_NAME)
-        .ok_or_else(|| "no chat model entry in .syl/registry/models.json".to_string())?;
-    let model_path = plugin_registry::resolve_local_path(&model_entry.download_url)
-        .map_err(|e| e.to_string())?;
-
-    let mut engine =
-        LlamaEngine::load(&library_path, &model_path, 2048, false).map_err(|e| e.to_string())?;
+    let mut engine = LlamaEngine::load(
+        &resolved.engine_library_path,
+        &resolved.model_path,
+        2048,
+        false,
+    )
+    .map_err(|e| e.to_string())?;
 
     let response = engine
         .generate(prompt, 128, |piece| {

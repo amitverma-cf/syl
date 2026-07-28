@@ -1,12 +1,15 @@
 mod bootstrap;
 mod commands;
 mod logging;
+mod models;
+mod observability;
 mod permission;
 
 use std::sync::Arc;
 
 use core_types::workspace_paths;
 use memory::SqliteConversationStore;
+use observability::ObservabilityState;
 use permission::TauriPermissionPrompter;
 use tauri::Manager;
 use tool::{ReadFileTool, RunCommandTool, ToolExecutor, WriteFileTool};
@@ -56,6 +59,11 @@ pub fn run() {
                 executor: Arc::new(executor),
                 prompter,
             });
+
+            let observability_state = Arc::new(ObservabilityState::default());
+            observability::spawn_sampler(observability_state.clone());
+            app.manage(observability_state);
+
             Ok(())
         })
         .invoke_handler(tauri::generate_handler![
@@ -63,6 +71,9 @@ pub fn run() {
             commands::list_messages,
             commands::call_tool,
             commands::respond_permission,
+            models::list_available_models,
+            models::download_model,
+            observability::system_stats,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

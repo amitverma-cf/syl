@@ -1,7 +1,7 @@
 use std::path::{Path, PathBuf};
 
 use core_types::workspace_paths;
-use plugin_registry::{EngineEntry, ModelEntry};
+use plugin_registry::{DownloadSource, EngineEntry, ModelEntry};
 
 pub fn ensure_workspace_seeded() {
     let syl_registry_dir = workspace_paths::registry_dir();
@@ -36,25 +36,14 @@ pub fn ensure_workspace_seeded() {
     }
     write_json(&syl_registry_dir.join("engines.json"), &seeded_engines);
     write_json(&syl_registry_dir.join("models.json"), &seeded_models);
+
+    let _ = std::fs::remove_file(syl_registry_dir.join("local.engines.json"));
+    let _ = std::fs::remove_file(syl_registry_dir.join("local.models.json"));
 }
 
 fn seed_engine(entry: EngineEntry) -> Option<EngineEntry> {
-    let source_path = match plugin_registry::resolve_local_path(&entry.download_url) {
-        Ok(path) => path,
-        Err(err) => {
-            tracing::warn!(?err, engine = %entry.id, "skipping engine seed, source not resolvable");
-            return None;
-        }
-    };
-    let source_dir = source_path.parent()?;
     let dest_dir = workspace_paths::engines_dir().join(&entry.id);
-
-    if let Err(err) = copy_dir_files(source_dir, &dest_dir) {
-        tracing::error!(?err, engine = %entry.id, "failed to copy engine files");
-        return None;
-    }
-
-    let dest_path = dest_dir.join(source_path.file_name()?);
+    let dest_path = seed_into(&entry.download_url, &dest_dir)?;
     Some(EngineEntry {
         download_url: file_url(&dest_path),
         ..entry
@@ -62,30 +51,27 @@ fn seed_engine(entry: EngineEntry) -> Option<EngineEntry> {
 }
 
 fn seed_model(entry: ModelEntry) -> Option<ModelEntry> {
-    let source_path = match plugin_registry::resolve_local_path(&entry.download_url) {
-        Ok(path) => path,
-        Err(err) => {
-            tracing::warn!(?err, model = %entry.name, "skipping model seed, source not resolvable");
-            return None;
-        }
-    };
     let dest_dir = workspace_paths::models_dir();
-    if let Err(err) = std::fs::create_dir_all(&dest_dir) {
-        tracing::error!(?err, "failed to create .syl/models");
-        return None;
-    }
-    let dest_path = dest_dir.join(source_path.file_name()?);
-    if !dest_path.exists() {
-        if let Err(err) = std::fs::copy(&source_path, &dest_path) {
-            tracing::error!(?err, model = %entry.name, "failed to copy model file");
-            return None;
-        }
-    }
-
+    let dest_path = seed_into(&entry.download_url, &dest_dir)?;
     Some(ModelEntry {
         download_url: file_url(&dest_path),
         ..entry
     })
+}
+
+fn seed_into(download_url: &str, dest_dir: &Path) -> Option<PathBuf> {
+    match plugin_registry::resolve_download_url(download_url) {
+        Ok(DownloadSource::Local(source_path)) => {
+            let source_dir = source_path.parent()?;
+            copy_dir_files(source_dir, dest_dir).ok()?;
+            Some(dest_dir.join(source_path.file_name()?))
+        }
+        Ok(DownloadSource::Remote(url)) => plugin_registry::download_to_cache(&url, dest_dir).ok(),
+        Err(err) => {
+            tracing::warn!(?err, url = %download_url, "skipping seed, source not resolvable");
+            None
+        }
+    }
 }
 
 fn copy_dir_files(source_dir: &Path, dest_dir: &Path) -> std::io::Result<()> {
