@@ -8,9 +8,13 @@ license.workspace = true
 core-types.workspace = true
 futures-util.workspace = true
 genai.workspace = true
+tool.workspace = true
 serde.workspace = true
 serde_json.workspace = true
 thiserror.workspace = true
 tokio.workspace = true
 tracing.workspace = true
 ureq.workspace = true
+
+[dev-dependencies]
+memory.workspace = true

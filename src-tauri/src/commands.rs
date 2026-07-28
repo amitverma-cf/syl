@@ -6,6 +6,7 @@ use engine_host::llama::LlamaEngine;
 use memory::{ConversationStore, ConversationSummary, Message, SqliteConversationStore};
 use plugin_registry::ModelKind;
 use tauri::ipc::Channel;
+use tool::ToolExecutor;
 
 use crate::daemon::DaemonState;
 use crate::flows::{FlowState, DEFAULT_FLOW_NAME};
@@ -35,31 +36,9 @@ pub async fn generate(
     let store = state.conversation_store.clone();
 
     let flow_turn = flow_state.ensure_and_take_turn(&conversation_id)?;
-
-    let tool_context = match &flow_turn.on_enter_tool_call {
-        Some(tool_call) => {
-            let call_result = tool_state
-                .executor
-                .call(&conversation_id, &tool_call.tool, tool_call.args.clone())
-                .await;
-            daemon_state
-                .event_bus
-                .publish(DaemonEvent::ToolCallCompleted {
-                    tool: tool_call.tool.clone(),
-                    ok: call_result.is_ok(),
-                });
-            Some(call_result.map_err(|e| e.to_string())?.to_string())
-        }
-        None => None,
-    };
-
-    let system_prompt = &flow_turn.system_prompt;
-    let augmented_prompt = match &tool_context {
-        Some(tool_context) => {
-            format!("{system_prompt}\n\nTool output: {tool_context}\n\nUser: {prompt}")
-        }
-        None => format!("{system_prompt}\n\nUser: {prompt}"),
-    };
+    let tool_specs = tool_state
+        .executor
+        .tool_specs_filtered(&flow_turn.tool_allowlist);
 
     let conversation_id_for_store = conversation_id.clone();
     let cloud_model = model.filter(|m| !m.is_empty());
@@ -69,23 +48,31 @@ pub async fn generate(
                 &store,
                 &conversation_id_for_store,
                 &prompt,
-                &augmented_prompt,
+                &flow_turn.system_prompt,
                 &model_id,
+                &tool_specs,
+                &tool_state.executor,
                 &on_event,
             )
             .await
         }
-        None => tauri::async_runtime::spawn_blocking(move || {
-            run_generate(
-                &store,
-                &conversation_id_for_store,
-                &prompt,
-                &augmented_prompt,
-                &on_event,
-            )
-        })
-        .await
-        .map_err(|e| e.to_string())?,
+        None => {
+            let executor = tool_state.executor.clone();
+            let system_prompt = flow_turn.system_prompt.clone();
+            tauri::async_runtime::spawn_blocking(move || {
+                run_generate(
+                    &store,
+                    &conversation_id_for_store,
+                    &prompt,
+                    &system_prompt,
+                    &tool_specs,
+                    &executor,
+                    &on_event,
+                )
+            })
+            .await
+            .map_err(|e| e.to_string())?
+        }
     };
 
     match generation_result {
@@ -186,13 +173,16 @@ pub fn respond_permission(
     state.prompter.resolve(request_id, response);
 }
 
-#[tracing::instrument(skip(store, on_event))]
+#[tracing::instrument(skip(store, tools, executor, on_event))]
+#[allow(clippy::too_many_arguments)]
 async fn run_generate_cloud(
     store: &Arc<SqliteConversationStore>,
     conversation_id: &str,
     prompt: &str,
-    engine_prompt: &str,
+    system_prompt: &str,
     model_id: &str,
+    tools: &[tool::ToolSpec],
+    executor: &ToolExecutor,
     on_event: &Channel<GenerationEvent>,
 ) -> Result<(), String> {
     let result: Result<(), String> = async {
@@ -210,13 +200,22 @@ async fn run_generate_cloud(
             &workspace_paths::env_file(),
             &workspace_paths::custom_providers_file(),
         );
-        let response = provider::stream_chat(&client, model_id, None, engine_prompt, |piece| {
-            if let Err(err) = on_event.send(GenerationEvent::Piece {
-                text: piece.to_string(),
-            }) {
-                tracing::error!(?err, "failed to send piece to channel");
-            }
-        })
+        let response = provider::chat_with_tools(
+            &client,
+            model_id,
+            Some(system_prompt),
+            prompt,
+            tools,
+            executor,
+            conversation_id,
+            |piece| {
+                if let Err(err) = on_event.send(GenerationEvent::Piece {
+                    text: piece.to_string(),
+                }) {
+                    tracing::error!(?err, "failed to send piece to channel");
+                }
+            },
+        )
         .await
         .map_err(|e| e.to_string())?;
 
@@ -245,12 +244,15 @@ async fn run_generate_cloud(
     result
 }
 
-#[tracing::instrument(skip(store, on_event))]
+#[tracing::instrument(skip(store, tools, executor, on_event))]
+#[allow(clippy::too_many_arguments)]
 fn run_generate(
     store: &Arc<SqliteConversationStore>,
     conversation_id: &str,
     prompt: &str,
-    engine_prompt: &str,
+    system_prompt: &str,
+    tools: &[tool::ToolSpec],
+    executor: &ToolExecutor,
     on_event: &Channel<GenerationEvent>,
 ) -> Result<(), String> {
     let result = (|| -> Result<(), String> {
@@ -274,15 +276,22 @@ fn run_generate(
         )
         .map_err(|e| e.to_string())?;
 
-        let response = engine
-            .generate(engine_prompt, 128, |piece| {
+        let response = engine_host::tool_loop::generate_with_tools(
+            &mut engine,
+            system_prompt,
+            prompt,
+            tools,
+            executor,
+            conversation_id,
+            128,
+            |piece| {
                 if let Err(err) = on_event.send(GenerationEvent::Piece {
                     text: piece.to_string(),
                 }) {
                     tracing::error!(?err, "failed to send piece to channel");
                 }
-            })
-            .map_err(|e| e.to_string())?;
+            },
+        )?;
 
         store
             .append_message(conversation_id, "assistant", &response)

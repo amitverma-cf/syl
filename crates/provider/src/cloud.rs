@@ -2,12 +2,18 @@ use std::path::Path;
 
 use futures_util::StreamExt;
 use genai::adapter::AdapterKind;
-use genai::chat::{ChatMessage, ChatRequest, ChatStreamEvent};
+use genai::chat::{
+    ChatMessage, ChatRequest, ChatStreamEvent, Tool as GenaiTool, ToolResponse as GenaiToolResponse,
+};
 use genai::resolver::{AuthData, AuthResolver, Endpoint, ServiceTargetResolver};
 use genai::{Client, ModelIden, ServiceTarget};
 
 use crate::custom::list_custom_providers;
 use crate::keys::load_env_file;
+
+/// Hard cap on how many tool-call round trips [`chat_with_tools`] will make for a single user
+/// turn before giving up — guards against a model that keeps calling tools indefinitely.
+const MAX_TOOL_ITERATIONS: u32 = 8;
 
 #[derive(Debug, thiserror::Error)]
 pub enum CloudChatError {
@@ -15,6 +21,8 @@ pub enum CloudChatError {
     MissingApiKey,
     #[error("cloud provider request failed: {0}")]
     Request(#[from] genai::Error),
+    #[error("tool-calling loop exceeded {0} iterations without a final answer")]
+    ToolIterationLimitExceeded(u32),
 }
 
 /// The model-ID prefix used for custom OpenAI-compatible providers: `custom::<provider>::<model>`.
@@ -99,4 +107,69 @@ pub async fn stream_chat(
         }
     }
     Ok(full_text)
+}
+
+/// Runs a model-driven tool-calling turn using `genai`'s native tool-calling support: the
+/// model itself decides whether to call a tool, we execute it through `executor` (permission
+/// gate still applies) and feed the result back, repeating until the model returns a
+/// text-only answer or [`MAX_TOOL_ITERATIONS`] is exceeded. The final answer is delivered
+/// whole via `on_piece` rather than token-by-token, since whether a turn ends in a tool call
+/// or text can't be known until the full response is in.
+#[allow(clippy::too_many_arguments)]
+pub async fn chat_with_tools(
+    client: &Client,
+    model_id: &str,
+    system_prompt: Option<&str>,
+    user_prompt: &str,
+    tools: &[tool::ToolSpec],
+    executor: &tool::ToolExecutor,
+    conversation_id: &str,
+    mut on_piece: impl FnMut(&str),
+) -> Result<String, CloudChatError> {
+    let mut messages = Vec::new();
+    if let Some(system_prompt) = system_prompt {
+        messages.push(ChatMessage::system(system_prompt));
+    }
+    messages.push(ChatMessage::user(user_prompt));
+
+    let genai_tools: Vec<GenaiTool> = tools
+        .iter()
+        .map(|spec| {
+            GenaiTool::new(spec.name.clone())
+                .with_description(spec.description.clone())
+                .with_schema(spec.input_schema.clone())
+        })
+        .collect();
+
+    for _ in 0..MAX_TOOL_ITERATIONS {
+        let mut request = ChatRequest::new(messages.clone());
+        if !genai_tools.is_empty() {
+            request = request.with_tools(genai_tools.clone());
+        }
+        let response = client.exec_chat(model_id, request, None).await?;
+        let tool_calls: Vec<_> = response.tool_calls().into_iter().cloned().collect();
+        if tool_calls.is_empty() {
+            let text = response.into_first_text().unwrap_or_default();
+            on_piece(&text);
+            return Ok(text);
+        }
+
+        messages.push(ChatMessage::from(tool_calls.clone()));
+        for call in &tool_calls {
+            let result = executor
+                .call(conversation_id, &call.fn_name, call.fn_arguments.clone())
+                .await;
+            let content = match result {
+                Ok(value) => value.to_string(),
+                Err(err) => format!("error: {err}"),
+            };
+            messages.push(ChatMessage::from(GenaiToolResponse::from_tool_call(
+                call, content,
+            )));
+        }
+    }
+
+    Err(CloudChatError::ToolIterationLimitExceeded(
+        MAX_TOOL_ITERATIONS,
+    ))
 }

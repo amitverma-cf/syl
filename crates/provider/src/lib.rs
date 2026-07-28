@@ -4,7 +4,7 @@ mod custom;
 mod keys;
 
 pub use catalog::{list_cloud_models, CloudModel};
-pub use cloud::{build_client, stream_chat, CloudChatError};
+pub use cloud::{build_client, chat_with_tools, stream_chat, CloudChatError};
 pub use custom::{
     add_custom_provider, list_custom_providers, CustomProviderConfig, CustomProviderError,
 };

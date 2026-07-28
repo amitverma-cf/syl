@@ -2,7 +2,7 @@ use std::collections::HashMap;
 use std::sync::Mutex;
 
 use core_types::workspace_paths;
-use executor::{FlowRunner, ToolCallSpec};
+use executor::FlowRunner;
 
 /// The flow every new conversation starts on, unless the user picks a different one — its
 /// definition ships in the repo-root `flows/` directory like every other flow (see
@@ -16,13 +16,12 @@ pub struct FlowState {
     runners: Mutex<HashMap<String, FlowRunner>>,
 }
 
-/// What a chat turn needs from the active flow: the system prompt and any fixed tool call the
-/// state runs on entry. (`tool_allowlist` isn't threaded through yet — nothing consumes it
-/// until the model-driven tool-calling loop lands, at which point it decides which of the
-/// registered tools the model is allowed to choose from for this state.)
+/// What a chat turn needs from the active flow: the system prompt and the state's tool
+/// allowlist (empty means every registered tool is allowed — the model itself decides
+/// whether and which tool to call, via the tool-calling loop in `commands::generate`).
 pub struct FlowTurn {
     pub system_prompt: String,
-    pub on_enter_tool_call: Option<ToolCallSpec>,
+    pub tool_allowlist: Vec<String>,
 }
 
 impl FlowState {
@@ -37,7 +36,7 @@ impl FlowState {
         let runner = runners.get(conversation_id).expect("just inserted above");
         Ok(FlowTurn {
             system_prompt: runner.current_state().system_prompt.clone(),
-            on_enter_tool_call: runner.on_enter_tool_call().cloned(),
+            tool_allowlist: runner.current_state().tool_allowlist.clone(),
         })
     }
 
