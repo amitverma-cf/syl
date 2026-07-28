@@ -4,6 +4,9 @@ use std::sync::Arc;
 
 use daemon::events::{DaemonEvent, EventBus};
 use daemon::scheduler::CronScheduler;
+use tauri::{AppHandle, Manager};
+
+use crate::scheduled_jobs::{register_persisted_jobs, SchedulerState};
 
 const REGISTRY_BASE_URL: &str = "https://raw.githubusercontent.com/amitverma-cf/syl/main/registry";
 
@@ -19,10 +22,13 @@ impl Default for DaemonState {
     }
 }
 
-/// Starts the background scheduler and registers the registry-poll job. Runs independent of
-/// whether the main window is open, so it must be spawned once at app startup, not lazily on
-/// first UI interaction.
-pub async fn spawn(event_bus: Arc<EventBus>) {
+/// Starts the background scheduler, registers the registry-poll job plus every persisted
+/// user-defined scheduled job, and manages the running scheduler as app state so commands can
+/// add/remove jobs at runtime. Runs independent of whether the main window is open, so it must
+/// be spawned once at app startup, not lazily on first UI interaction.
+pub async fn spawn(app: AppHandle) {
+    let event_bus = app.state::<DaemonState>().event_bus.clone();
+
     let scheduler = match CronScheduler::new().await {
         Ok(scheduler) => scheduler,
         Err(err) => {
@@ -46,14 +52,14 @@ pub async fn spawn(event_bus: Arc<EventBus>) {
         return;
     }
 
-    if let Err(err) = scheduler.start().await {
+    let scheduler_state = SchedulerState::new(Arc::new(scheduler));
+    register_persisted_jobs(&app, &scheduler_state).await;
+
+    if let Err(err) = scheduler_state.scheduler.start().await {
         tracing::error!(?err, "failed to start the daemon cron scheduler");
         return;
     }
-
-    // The scheduler drives itself via its own tokio task once started; keep it alive for the
-    // life of the process rather than dropping it at the end of this async fn.
-    std::mem::forget(scheduler);
+    app.manage(scheduler_state);
 }
 
 async fn poll_registry(event_bus: Arc<EventBus>) {

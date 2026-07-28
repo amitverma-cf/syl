@@ -862,9 +862,13 @@ name = "daemon"
 version = "0.1.0"
 dependencies = [
  "core-types",
+ "serde",
+ "serde_json",
+ "thiserror 1.0.69",
  "tokio",
  "tokio-cron-scheduler",
  "tracing",
+ "uuid",
 ]
 
 [[package]]
@@ -4509,10 +4513,12 @@ dependencies = [
  "tauri-plugin-autostart",
  "tauri-plugin-opener",
  "tokio",
+ "tokio-cron-scheduler",
  "tool",
  "tracing",
  "tracing-appender",
  "tracing-subscriber",
+ "uuid",
 ]
 
 [[package]]

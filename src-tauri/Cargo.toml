@@ -33,3 +33,5 @@ tokio.workspace = true
 async-trait = "0.1"
 sysinfo.workspace = true
 tauri-plugin-autostart.workspace = true
+tokio-cron-scheduler.workspace = true
+uuid.workspace = true

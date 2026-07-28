@@ -5,6 +5,7 @@ pub enum DaemonEvent {
     FlowStateChanged { flow: String, state: String },
     ToolCallCompleted { tool: String, ok: bool },
     RegistryPolled { ok: bool },
+    ScheduledJobFired { job: String, ok: bool },
 }
 
 pub struct EventBus {
