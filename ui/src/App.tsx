@@ -20,7 +20,31 @@ interface PermissionRequest {
   args: Record<string, unknown>;
 }
 
+interface CatalogModel {
+  name: string;
+  kind: "chat" | "embedding";
+  sizeBytes: number;
+  quantization: string;
+  requiredEngine: string;
+  alreadyDownloaded: boolean;
+  fitsInAvailableMemory: boolean;
+}
+
+interface SystemStats {
+  cpuUsagePercent: number;
+  memoryUsedBytes: number;
+  memoryTotalBytes: number;
+  processMemoryBytes: number;
+  workspaceDiskBytes: number;
+}
+
 const CONVERSATION_ID = "default";
+
+function formatBytes(bytes: number): string {
+  const gb = bytes / 1024 / 1024 / 1024;
+  if (gb >= 1) return `${gb.toFixed(1)} GB`;
+  return `${(bytes / 1024 / 1024).toFixed(0)} MB`;
+}
 
 function App() {
   const [messages, setMessages] = useState<StoredMessage[]>([]);
@@ -36,6 +60,10 @@ function App() {
   const [toolCommand, setToolCommand] = useState("echo hello");
   const [toolResult, setToolResult] = useState<string | null>(null);
 
+  const [models, setModels] = useState<CatalogModel[]>([]);
+  const [downloadingModel, setDownloadingModel] = useState<string | null>(null);
+  const [stats, setStats] = useState<SystemStats | null>(null);
+
   useEffect(() => {
     invoke<StoredMessage[]>("list_messages", { conversationId: CONVERSATION_ID })
       .then(setMessages)
@@ -50,6 +78,38 @@ function App() {
       unlisten.then((fn) => fn());
     };
   }, []);
+
+  function refreshModels() {
+    invoke<CatalogModel[]>("list_available_models")
+      .then(setModels)
+      .catch((err) => setError(String(err)));
+  }
+
+  useEffect(() => {
+    refreshModels();
+  }, []);
+
+  useEffect(() => {
+    function poll() {
+      invoke<SystemStats>("system_stats").then(setStats).catch(() => {});
+    }
+    poll();
+    const interval = setInterval(poll, 5000);
+    return () => clearInterval(interval);
+  }, []);
+
+  async function handleDownloadModel(name: string) {
+    setDownloadingModel(name);
+    setError(null);
+    try {
+      await invoke("download_model", { name });
+      refreshModels();
+    } catch (err) {
+      setError(String(err));
+    } finally {
+      setDownloadingModel(null);
+    }
+  }
 
   async function respondToPermission(
     response: "allowOnce" | "allowAlways" | "deny" | "denyAlways",
@@ -130,9 +190,23 @@ function App() {
     }
   }
 
+  const noChatModel = error?.toLowerCase().includes("no chat model") ?? false;
+
   return (
     <main className="flex h-screen w-screen flex-col items-center gap-4 bg-neutral-950 p-8 text-neutral-100">
-      <h1 className="text-2xl font-semibold">syl</h1>
+      <div className="flex w-full max-w-2xl items-center justify-between">
+        <h1 className="text-2xl font-semibold">syl</h1>
+        {stats && (
+          <div className="flex gap-3 text-xs text-neutral-500">
+            <span>CPU {stats.cpuUsagePercent.toFixed(0)}%</span>
+            <span>
+              RAM {formatBytes(stats.memoryUsedBytes)} / {formatBytes(stats.memoryTotalBytes)}
+            </span>
+            <span>Process {formatBytes(stats.processMemoryBytes)}</span>
+            <span>.syl {formatBytes(stats.workspaceDiskBytes)}</span>
+          </div>
+        )}
+      </div>
 
       {permissionRequest && (
         <div className="w-full max-w-2xl rounded border border-amber-600 bg-amber-950/40 p-4">
@@ -185,6 +259,14 @@ function App() {
 
       {error && <p className="w-full max-w-2xl text-sm text-red-400">{error}</p>}
 
+      {noChatModel && (
+        <div className="w-full max-w-2xl rounded border border-blue-700 bg-blue-950/40 p-4">
+          <p className="mb-2 text-sm">
+            No chat model is set up yet. Download one from the catalog below to get started.
+          </p>
+        </div>
+      )}
+
       <form onSubmit={handleSubmit} className="flex w-full max-w-2xl gap-2">
         <input
           value={prompt}
@@ -201,6 +283,46 @@ function App() {
           {isGenerating ? "Generating..." : "Send"}
         </button>
       </form>
+
+      <div className="flex w-full max-w-2xl flex-col gap-2 rounded border border-neutral-800 bg-neutral-900 p-4">
+        <div className="flex items-center justify-between">
+          <span className="text-sm font-medium">Model catalog</span>
+          <button
+            onClick={refreshModels}
+            className="text-xs text-neutral-400 underline"
+          >
+            Refresh
+          </button>
+        </div>
+        {models.length === 0 && (
+          <p className="text-sm text-neutral-500">No models in the registry yet.</p>
+        )}
+        {models.map((m) => (
+          <div
+            key={m.name}
+            className="flex items-center justify-between rounded border border-neutral-800 px-3 py-2 text-sm"
+          >
+            <div>
+              <span className="font-mono">{m.name}</span>
+              <span className="ml-2 text-xs text-neutral-500">
+                {m.kind} · {m.quantization} · {formatBytes(m.sizeBytes)}
+                {!m.fitsInAvailableMemory && " · may not fit in available RAM"}
+              </span>
+            </div>
+            {m.alreadyDownloaded ? (
+              <span className="text-xs text-green-400">Downloaded</span>
+            ) : (
+              <button
+                onClick={() => handleDownloadModel(m.name)}
+                disabled={downloadingModel === m.name}
+                className="rounded bg-neutral-100 px-2 py-1 text-xs font-medium text-neutral-950 disabled:opacity-50"
+              >
+                {downloadingModel === m.name ? "Downloading..." : "Download"}
+              </button>
+            )}
+          </div>
+        ))}
+      </div>
 
       <div className="flex w-full max-w-2xl flex-col gap-2 rounded border border-neutral-800 bg-neutral-900 p-4">
         <div className="flex gap-2">
