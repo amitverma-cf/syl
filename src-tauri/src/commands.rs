@@ -20,10 +20,12 @@ pub enum GenerationEvent {
 }
 
 #[tauri::command]
+#[allow(clippy::too_many_arguments)]
 #[tracing::instrument(skip(on_event, state, tool_state, flow_state, daemon_state))]
 pub async fn generate(
     prompt: String,
     conversation_id: String,
+    model: Option<String>,
     on_event: Channel<GenerationEvent>,
     state: tauri::State<'_, AppState>,
     tool_state: tauri::State<'_, ToolState>,
@@ -73,17 +75,31 @@ pub async fn generate(
     };
 
     let conversation_id_for_store = conversation_id.clone();
-    let generation_result = tauri::async_runtime::spawn_blocking(move || {
-        run_generate(
-            &store,
-            &conversation_id_for_store,
-            &prompt,
-            &augmented_prompt,
-            &on_event,
-        )
-    })
-    .await
-    .map_err(|e| e.to_string())?;
+    let cloud_model = model.filter(|m| !m.is_empty());
+    let generation_result = match cloud_model {
+        Some(model_id) => {
+            run_generate_cloud(
+                &store,
+                &conversation_id_for_store,
+                &prompt,
+                &augmented_prompt,
+                &model_id,
+                &on_event,
+            )
+            .await
+        }
+        None => tauri::async_runtime::spawn_blocking(move || {
+            run_generate(
+                &store,
+                &conversation_id_for_store,
+                &prompt,
+                &augmented_prompt,
+                &on_event,
+            )
+        })
+        .await
+        .map_err(|e| e.to_string())?,
+    };
 
     match generation_result {
         Ok(()) => {
@@ -143,6 +159,62 @@ pub fn respond_permission(
     state: tauri::State<'_, ToolState>,
 ) {
     state.prompter.resolve(request_id, response);
+}
+
+#[tracing::instrument(skip(store, on_event))]
+async fn run_generate_cloud(
+    store: &Arc<SqliteConversationStore>,
+    conversation_id: &str,
+    prompt: &str,
+    engine_prompt: &str,
+    model_id: &str,
+    on_event: &Channel<GenerationEvent>,
+) -> Result<(), String> {
+    let result: Result<(), String> = async {
+        let store_for_user = store.clone();
+        let conversation_id_owned = conversation_id.to_string();
+        let prompt_owned = prompt.to_string();
+        tauri::async_runtime::spawn_blocking(move || {
+            store_for_user.append_message(&conversation_id_owned, "user", &prompt_owned)
+        })
+        .await
+        .map_err(|e| e.to_string())?
+        .map_err(|e| e.to_string())?;
+
+        let client = provider::build_client(&workspace_paths::env_file());
+        let response = provider::stream_chat(&client, model_id, None, engine_prompt, |piece| {
+            if let Err(err) = on_event.send(GenerationEvent::Piece {
+                text: piece.to_string(),
+            }) {
+                tracing::error!(?err, "failed to send piece to channel");
+            }
+        })
+        .await
+        .map_err(|e| e.to_string())?;
+
+        let store_for_assistant = store.clone();
+        let conversation_id_owned = conversation_id.to_string();
+        tauri::async_runtime::spawn_blocking(move || {
+            store_for_assistant.append_message(&conversation_id_owned, "assistant", &response)
+        })
+        .await
+        .map_err(|e| e.to_string())?
+        .map_err(|e| e.to_string())?;
+        Ok(())
+    }
+    .await;
+
+    match &result {
+        Ok(()) => {
+            let _ = on_event.send(GenerationEvent::Done);
+        }
+        Err(message) => {
+            let _ = on_event.send(GenerationEvent::Error {
+                message: message.clone(),
+            });
+        }
+    }
+    result
 }
 
 #[tracing::instrument(skip(store, on_event))]
