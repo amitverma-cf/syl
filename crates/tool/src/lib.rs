@@ -1,11 +1,15 @@
 mod context;
+mod mcp;
 mod native;
 
 pub use context::compress_context;
+pub use mcp::{
+    load_mcp_servers, save_mcp_servers, McpServerConfig, McpToolBridge, McpToolDescriptor,
+};
 pub use native::{ReadFileTool, RunCommandTool, WriteFileTool};
 
 use std::collections::HashMap;
-use std::sync::Arc;
+use std::sync::{Arc, RwLock};
 
 use async_trait::async_trait;
 use memory::{ToolPermissionDecision, ToolPermissionStore};
@@ -64,7 +68,7 @@ impl PermissionPrompter for AlwaysApprove {
 }
 
 pub struct ToolExecutor {
-    tools: HashMap<String, Arc<dyn Tool>>,
+    tools: RwLock<HashMap<String, Arc<dyn Tool>>>,
     prompter: Arc<dyn PermissionPrompter>,
     permissions: Arc<dyn ToolPermissionStore>,
 }
@@ -75,14 +79,27 @@ impl ToolExecutor {
         permissions: Arc<dyn ToolPermissionStore>,
     ) -> Self {
         Self {
-            tools: HashMap::new(),
+            tools: RwLock::new(HashMap::new()),
             prompter,
             permissions,
         }
     }
 
-    pub fn register(&mut self, tool: Arc<dyn Tool>) {
-        self.tools.insert(tool.name().to_string(), tool);
+    /// Takes `&self` (not `&mut self`) so tools can be registered after startup — e.g. an MCP
+    /// server's tools, discovered only once the user connects it from the running app.
+    pub fn register(&self, tool: Arc<dyn Tool>) {
+        self.tools
+            .write()
+            .unwrap()
+            .insert(tool.name().to_string(), tool);
+    }
+
+    pub fn unregister(&self, name: &str) {
+        self.tools.write().unwrap().remove(name);
+    }
+
+    pub fn tool_names(&self) -> Vec<String> {
+        self.tools.read().unwrap().keys().cloned().collect()
     }
 
     pub async fn call(
@@ -93,7 +110,10 @@ impl ToolExecutor {
     ) -> Result<serde_json::Value, ToolError> {
         let tool = self
             .tools
+            .read()
+            .unwrap()
             .get(name)
+            .cloned()
             .ok_or_else(|| ToolError::UnknownTool(name.to_string()))?;
 
         match tool.required_permission() {

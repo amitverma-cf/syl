@@ -54,7 +54,7 @@ fn permission_store() -> Arc<SqliteConversationStore> {
 #[tokio::test]
 async fn allow_permission_runs_without_prompting() {
     let called = Arc::new(AtomicBool::new(false));
-    let mut executor = ToolExecutor::new(
+    let executor = ToolExecutor::new(
         Arc::new(TrackingPrompter {
             called: called.clone(),
             response: PromptResponse::AllowOnce,
@@ -73,7 +73,7 @@ async fn allow_permission_runs_without_prompting() {
 #[tokio::test]
 async fn deny_permission_never_calls_the_tool_or_prompter() {
     let called = Arc::new(AtomicBool::new(false));
-    let mut executor = ToolExecutor::new(
+    let executor = ToolExecutor::new(
         Arc::new(TrackingPrompter {
             called: called.clone(),
             response: PromptResponse::AllowOnce,
@@ -95,7 +95,7 @@ async fn ask_permission_runs_the_tool_once_when_approved_once() {
         Arc::new(FixedPrompter(PromptResponse::AllowOnce)),
         permission_store(),
     );
-    let mut executor = executor;
+    let executor = executor;
     executor.register(Arc::new(EchoTool {
         permission: Permission::Ask,
     }));
@@ -106,7 +106,7 @@ async fn ask_permission_runs_the_tool_once_when_approved_once() {
 
 #[tokio::test]
 async fn ask_permission_denies_once_when_rejected() {
-    let mut executor = ToolExecutor::new(
+    let executor = ToolExecutor::new(
         Arc::new(FixedPrompter(PromptResponse::Deny)),
         permission_store(),
     );
@@ -121,7 +121,7 @@ async fn ask_permission_denies_once_when_rejected() {
 #[tokio::test]
 async fn allow_always_is_remembered_and_stops_prompting() {
     let called = Arc::new(AtomicBool::new(false));
-    let mut executor = ToolExecutor::new(
+    let executor = ToolExecutor::new(
         Arc::new(TrackingPrompter {
             called: called.clone(),
             response: PromptResponse::AllowAlways,
@@ -144,7 +144,7 @@ async fn allow_always_is_remembered_and_stops_prompting() {
 #[tokio::test]
 async fn deny_always_is_remembered_and_stops_prompting() {
     let called = Arc::new(AtomicBool::new(false));
-    let mut executor = ToolExecutor::new(
+    let executor = ToolExecutor::new(
         Arc::new(TrackingPrompter {
             called: called.clone(),
             response: PromptResponse::DenyAlways,
@@ -167,7 +167,7 @@ async fn deny_always_is_remembered_and_stops_prompting() {
 #[tokio::test]
 async fn remembered_permission_is_scoped_per_conversation() {
     let called = Arc::new(AtomicBool::new(false));
-    let mut executor = ToolExecutor::new(
+    let executor = ToolExecutor::new(
         Arc::new(TrackingPrompter {
             called: called.clone(),
             response: PromptResponse::AllowAlways,

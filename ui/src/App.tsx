@@ -56,6 +56,25 @@ interface CloudModel {
   label: string;
 }
 
+interface CustomProviderConfig {
+  name: string;
+  baseUrl: string;
+  envVar: string;
+  models: string[];
+}
+
+interface McpServerConfig {
+  name: string;
+  command: string;
+  args: string[];
+}
+
+interface McpToolDescriptor {
+  name: string;
+  description: string | null;
+  inputSchema: unknown;
+}
+
 const CONVERSATION_ID = "default";
 
 function formatBytes(bytes: number): string {
@@ -91,6 +110,19 @@ function App() {
   const [showSettings, setShowSettings] = useState(false);
   const [apiKeyDrafts, setApiKeyDrafts] = useState<Record<string, string>>({});
   const [savingProvider, setSavingProvider] = useState<string | null>(null);
+
+  const [customProviders, setCustomProviders] = useState<CustomProviderConfig[]>([]);
+  const [newProviderName, setNewProviderName] = useState("");
+  const [newProviderUrl, setNewProviderUrl] = useState("");
+  const [newProviderKey, setNewProviderKey] = useState("");
+  const [addingProvider, setAddingProvider] = useState(false);
+
+  const [mcpServers, setMcpServers] = useState<McpServerConfig[]>([]);
+  const [newMcpName, setNewMcpName] = useState("");
+  const [newMcpCommand, setNewMcpCommand] = useState("");
+  const [newMcpArgs, setNewMcpArgs] = useState("");
+  const [addingMcpServer, setAddingMcpServer] = useState(false);
+  const [mcpTools, setMcpTools] = useState<Record<string, McpToolDescriptor[]>>({});
 
   useEffect(() => {
     invoke<StoredMessage[]>("list_messages", { conversationId: CONVERSATION_ID })
@@ -156,11 +188,29 @@ function App() {
       .catch(() => {});
   }
 
-  useEffect(() => {
-    refreshProviders();
+  function refreshCloudModels() {
     invoke<CloudModel[]>("list_cloud_models")
       .then(setCloudModels)
       .catch(() => {});
+  }
+
+  function refreshCustomProviders() {
+    invoke<CustomProviderConfig[]>("list_custom_providers")
+      .then(setCustomProviders)
+      .catch(() => {});
+  }
+
+  function refreshMcpServers() {
+    invoke<McpServerConfig[]>("list_mcp_servers")
+      .then(setMcpServers)
+      .catch(() => {});
+  }
+
+  useEffect(() => {
+    refreshProviders();
+    refreshCloudModels();
+    refreshCustomProviders();
+    refreshMcpServers();
   }, []);
 
   async function handleSaveApiKey(envVar: string) {
@@ -176,6 +226,68 @@ function App() {
       setError(String(err));
     } finally {
       setSavingProvider(null);
+    }
+  }
+
+  async function handleAddCustomProvider(e: React.FormEvent) {
+    e.preventDefault();
+    if (!newProviderName.trim() || !newProviderUrl.trim()) return;
+    setAddingProvider(true);
+    setError(null);
+    try {
+      await invoke("add_custom_provider", {
+        name: newProviderName.trim(),
+        baseUrl: newProviderUrl.trim(),
+        apiKey: newProviderKey.trim() || null,
+      });
+      setNewProviderName("");
+      setNewProviderUrl("");
+      setNewProviderKey("");
+      refreshCustomProviders();
+      refreshCloudModels();
+    } catch (err) {
+      setError(String(err));
+    } finally {
+      setAddingProvider(false);
+    }
+  }
+
+  async function handleAddMcpServer(e: React.FormEvent) {
+    e.preventDefault();
+    if (!newMcpName.trim() || !newMcpCommand.trim()) return;
+    setAddingMcpServer(true);
+    setError(null);
+    try {
+      const args = newMcpArgs.trim().length > 0 ? newMcpArgs.trim().split(/\s+/) : [];
+      const tools = await invoke<McpToolDescriptor[]>("add_mcp_server", {
+        name: newMcpName.trim(),
+        command: newMcpCommand.trim(),
+        args,
+      });
+      setMcpTools((prev) => ({ ...prev, [newMcpName.trim()]: tools }));
+      setNewMcpName("");
+      setNewMcpCommand("");
+      setNewMcpArgs("");
+      refreshMcpServers();
+    } catch (err) {
+      setError(String(err));
+    } finally {
+      setAddingMcpServer(false);
+    }
+  }
+
+  async function handleRemoveMcpServer(name: string) {
+    setError(null);
+    try {
+      await invoke("remove_mcp_server", { name });
+      setMcpTools((prev) => {
+        const next = { ...prev };
+        delete next[name];
+        return next;
+      });
+      refreshMcpServers();
+    } catch (err) {
+      setError(String(err));
     }
   }
 
@@ -322,6 +434,98 @@ function App() {
                 Save
               </button>
               {p.configured && <span className="text-xs text-green-400">Configured</span>}
+            </div>
+          ))}
+
+          <span className="mt-2 text-sm font-medium">Custom OpenAI-compatible provider</span>
+          <form onSubmit={handleAddCustomProvider} className="flex flex-wrap gap-2">
+            <input
+              value={newProviderName}
+              onChange={(e) => setNewProviderName(e.currentTarget.value)}
+              placeholder="Name (e.g. my-server)"
+              className="w-40 rounded border border-neutral-700 bg-neutral-900 px-2 py-1 text-sm"
+            />
+            <input
+              value={newProviderUrl}
+              onChange={(e) => setNewProviderUrl(e.currentTarget.value)}
+              placeholder="Base URL (e.g. http://localhost:1234/v1)"
+              className="flex-1 rounded border border-neutral-700 bg-neutral-900 px-2 py-1 text-sm"
+            />
+            <input
+              type="password"
+              value={newProviderKey}
+              onChange={(e) => setNewProviderKey(e.currentTarget.value)}
+              placeholder="API key (optional)"
+              className="w-40 rounded border border-neutral-700 bg-neutral-900 px-2 py-1 text-sm"
+            />
+            <button
+              type="submit"
+              disabled={addingProvider}
+              className="rounded bg-neutral-100 px-2 py-1 text-xs font-medium text-neutral-950 disabled:opacity-50"
+            >
+              {addingProvider ? "Fetching models..." : "Add"}
+            </button>
+          </form>
+          {customProviders.map((p) => (
+            <div
+              key={p.name}
+              className="flex items-center justify-between rounded border border-neutral-800 px-2 py-1 text-xs text-neutral-400"
+            >
+              <span>
+                <span className="font-mono text-neutral-200">{p.name}</span> — {p.baseUrl} ·{" "}
+                {p.models.length} models
+              </span>
+            </div>
+          ))}
+
+          <span className="mt-2 text-sm font-medium">MCP servers</span>
+          <form onSubmit={handleAddMcpServer} className="flex flex-wrap gap-2">
+            <input
+              value={newMcpName}
+              onChange={(e) => setNewMcpName(e.currentTarget.value)}
+              placeholder="Name"
+              className="w-32 rounded border border-neutral-700 bg-neutral-900 px-2 py-1 text-sm"
+            />
+            <input
+              value={newMcpCommand}
+              onChange={(e) => setNewMcpCommand(e.currentTarget.value)}
+              placeholder="Command (e.g. npx)"
+              className="w-32 rounded border border-neutral-700 bg-neutral-900 px-2 py-1 text-sm"
+            />
+            <input
+              value={newMcpArgs}
+              onChange={(e) => setNewMcpArgs(e.currentTarget.value)}
+              placeholder="Args (space-separated)"
+              className="flex-1 rounded border border-neutral-700 bg-neutral-900 px-2 py-1 text-sm"
+            />
+            <button
+              type="submit"
+              disabled={addingMcpServer}
+              className="rounded bg-neutral-100 px-2 py-1 text-xs font-medium text-neutral-950 disabled:opacity-50"
+            >
+              {addingMcpServer ? "Connecting..." : "Connect"}
+            </button>
+          </form>
+          {mcpServers.map((s) => (
+            <div
+              key={s.name}
+              className="flex flex-col gap-1 rounded border border-neutral-800 px-2 py-1 text-xs text-neutral-400"
+            >
+              <div className="flex items-center justify-between">
+                <span>
+                  <span className="font-mono text-neutral-200">{s.name}</span> — {s.command}{" "}
+                  {s.args.join(" ")}
+                </span>
+                <button
+                  onClick={() => handleRemoveMcpServer(s.name)}
+                  className="text-neutral-400 underline"
+                >
+                  Remove
+                </button>
+              </div>
+              {mcpTools[s.name] && (
+                <span>Tools: {mcpTools[s.name].map((t) => t.name).join(", ")}</span>
+              )}
             </div>
           ))}
         </div>

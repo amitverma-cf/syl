@@ -3,6 +3,7 @@ mod commands;
 mod daemon;
 mod flows;
 mod logging;
+mod mcp;
 mod models;
 mod observability;
 mod permission;
@@ -65,7 +66,7 @@ pub fn run() {
             let workspace_root = workspace_paths::workspace_root().join("workspace");
             std::fs::create_dir_all(&workspace_root)?;
 
-            let mut executor = ToolExecutor::new(prompter.clone(), permission_store);
+            let executor = ToolExecutor::new(prompter.clone(), permission_store);
             executor.register(Arc::new(ReadFileTool {
                 workspace_root: workspace_root.clone(),
             }));
@@ -78,6 +79,8 @@ pub fn run() {
                 executor: Arc::new(executor),
                 prompter,
             });
+            app.manage(mcp::McpState::default());
+            mcp::reconnect_saved_servers(&app.handle().clone());
 
             let observability_state = Arc::new(ObservabilityState::default());
             observability::spawn_sampler(observability_state.clone());
@@ -125,6 +128,11 @@ pub fn run() {
             providers::list_providers,
             providers::set_provider_api_key,
             providers::list_cloud_models,
+            providers::list_custom_providers,
+            providers::add_custom_provider,
+            mcp::list_mcp_servers,
+            mcp::add_mcp_server,
+            mcp::remove_mcp_server,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

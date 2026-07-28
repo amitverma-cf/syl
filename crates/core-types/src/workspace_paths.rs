@@ -42,3 +42,11 @@ pub fn flows_dir() -> PathBuf {
 pub fn env_file() -> PathBuf {
     workspace_root().join(".env")
 }
+
+pub fn custom_providers_file() -> PathBuf {
+    workspace_root().join("custom_providers.json")
+}
+
+pub fn mcp_servers_file() -> PathBuf {
+    workspace_root().join("mcp_servers.json")
+}
