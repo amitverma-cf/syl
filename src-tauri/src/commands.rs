@@ -5,7 +5,7 @@ use engine_host::llama::LlamaEngine;
 use memory::{ConversationStore, Message, SqliteConversationStore};
 use tauri::ipc::Channel;
 
-use crate::AppState;
+use crate::{AppState, ToolState};
 
 const CHAT_MODEL_NAME: &str = "Qwen3.5-0.8B-Q4_K_M";
 
@@ -50,6 +50,29 @@ pub fn list_messages(
         .conversation_store
         .list_messages(&conversation_id)
         .map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+pub async fn call_tool(
+    conversation_id: String,
+    name: String,
+    args: serde_json::Value,
+    state: tauri::State<'_, ToolState>,
+) -> Result<serde_json::Value, String> {
+    state
+        .executor
+        .call(&conversation_id, &name, args)
+        .await
+        .map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+pub fn respond_permission(
+    request_id: u64,
+    response: tool::PromptResponse,
+    state: tauri::State<'_, ToolState>,
+) {
+    state.prompter.resolve(request_id, response);
 }
 
 #[tracing::instrument(skip(store, on_event))]
