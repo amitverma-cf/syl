@@ -25,8 +25,7 @@ fn main() {
         .write_to_file(&out_path)
         .expect("failed to write llama.cpp bindings");
 
-    // ggml's backend registry (which discovers/loads ggml-cpu-*.dll etc.) lives in a
-    // separate shared library from llama.dll, so it needs its own dynamic-loading binding.
+    // ggml_backend_load_all_from_path lives in ggml.dll/libggml.so, not llama.dll/libllama.so.
     let ggml_bindings = bindgen::Builder::default()
         .header(wrapper.to_string_lossy())
         .clang_arg(format!("-I{}", vendor_dir.display()))

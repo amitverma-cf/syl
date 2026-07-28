@@ -3,5 +3,4 @@
 /ui/dist
 /src-tauri/target
 /docs/active/
-/registry/local.engines.json
-/registry/local.models.json
+/.syl/

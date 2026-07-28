@@ -1,56 +1,68 @@
-//! A minimal, single-sequence text generation wrapper around a dynamically loaded llama.cpp
-//! shared library.
-
 use std::ffi::{c_char, CString};
 use std::path::Path;
 
 use crate::bindings::LlamaCpp;
 use crate::ggml_bindings::GgmlBackend;
 
-/// An error returned while loading or running the llama.cpp engine.
-#[derive(Debug, thiserror::Error)]
-pub enum LlamaError {
-    /// The shared library at the given path could not be loaded.
-    #[error("failed to load llama.cpp library: {0}")]
-    LibraryLoad(#[source] libloading::Error),
-    /// The model file could not be loaded.
-    #[error("failed to load model from {}", .0.display())]
-    ModelLoad(std::path::PathBuf),
-    /// The inference context could not be created.
-    #[error("failed to create llama.cpp context")]
-    ContextCreate,
-    /// The prompt could not be tokenized.
-    #[error("failed to tokenize prompt")]
-    Tokenize,
-    /// A decode step failed.
-    #[error("llama_decode failed with code {0}")]
-    Decode(i32),
+#[cfg(target_os = "windows")]
+extern "system" {
+    fn SetDllDirectoryW(lp_path_name: *const u16) -> i32;
 }
 
-/// A loaded llama.cpp model and inference context, ready to generate text for one sequence
-/// at a time.
+#[cfg(target_os = "windows")]
+fn prioritize_dll_directory(dir: &Path) {
+    use std::os::windows::ffi::OsStrExt;
+    let wide: Vec<u16> = dir
+        .as_os_str()
+        .encode_wide()
+        .chain(std::iter::once(0))
+        .collect();
+    unsafe { SetDllDirectoryW(wide.as_ptr()) };
+}
+
+#[cfg(not(target_os = "windows"))]
+fn prioritize_dll_directory(_dir: &Path) {}
+
+#[derive(Debug, thiserror::Error)]
+pub enum LlamaError {
+    #[error("failed to load llama.cpp library: {0}")]
+    LibraryLoad(#[source] libloading::Error),
+    #[error("failed to load model from {}", .0.display())]
+    ModelLoad(std::path::PathBuf),
+    #[error("failed to create llama.cpp context")]
+    ContextCreate,
+    #[error("failed to tokenize prompt")]
+    Tokenize,
+    #[error("llama_decode failed with code {0}")]
+    Decode(i32),
+    #[error("no embedding was produced; was the engine loaded with embeddings enabled?")]
+    EmbeddingUnavailable,
+}
+
 pub struct LlamaEngine {
     lib: LlamaCpp,
     model: *mut crate::bindings::llama_model,
     ctx: *mut crate::bindings::llama_context,
 }
 
-// The underlying llama.cpp context is only ever accessed through `&mut self`, so it is safe
-// to move a `LlamaEngine` across threads as long as it is not used concurrently.
 unsafe impl Send for LlamaEngine {}
 
 impl LlamaEngine {
-    /// Loads the llama.cpp shared library at `library_path` and the model at `model_path`,
-    /// creating an inference context sized to `n_ctx` tokens.
-    ///
-    /// # Errors
-    /// Returns an error if the library or model fails to load, or the context fails to create.
     #[tracing::instrument(skip(library_path, model_path), fields(
         library = %library_path.display(),
         model = %model_path.display(),
     ))]
-    pub fn load(library_path: &Path, model_path: &Path, n_ctx: u32) -> Result<Self, LlamaError> {
+    pub fn load(
+        library_path: &Path,
+        model_path: &Path,
+        n_ctx: u32,
+        embeddings: bool,
+    ) -> Result<Self, LlamaError> {
         let load_start = std::time::Instant::now();
+
+        if let Some(dir) = library_path.parent() {
+            prioritize_dll_directory(dir);
+        }
 
         // SAFETY: `library_path` is expected to point at a llama.cpp build implementing the
         // public llama.h C API this binding was generated from.
@@ -59,9 +71,8 @@ impl LlamaEngine {
         // SAFETY: must be called once before any other llama.cpp function.
         unsafe { lib.llama_backend_init() };
 
-        // llama.cpp's compute backends (CPU, CUDA, ...) are themselves plugins, loaded from
-        // the same directory as the main library. The loader for them lives in ggml-base,
-        // a separate shared library from llama.dll itself.
+        // llama.cpp's ggml_backend_load_all_from_path lives in ggml.dll/libggml.so, not in
+        // llama.dll/libllama.so itself — a separate dynamic-loading binding is required.
         let backend_dir_buf = library_path.parent().unwrap_or_else(|| Path::new("."));
         let backend_dir = path_to_cstring(backend_dir_buf);
         let ggml_base_path = backend_dir_buf.join(ggml_base_library_name());
@@ -77,6 +88,10 @@ impl LlamaEngine {
 
         let mut ctx_params = unsafe { lib.llama_context_default_params() };
         ctx_params.n_ctx = n_ctx;
+        if embeddings {
+            ctx_params.embeddings = true;
+            ctx_params.pooling_type = crate::bindings::llama_pooling_type_LLAMA_POOLING_TYPE_MEAN;
+        }
 
         let ctx = unsafe { lib.llama_init_from_model(model, ctx_params) };
         if ctx.is_null() {
@@ -91,12 +106,6 @@ impl LlamaEngine {
         Ok(Self { lib, model, ctx })
     }
 
-    /// Runs greedy generation for `prompt`, calling `on_token` with each generated piece of
-    /// text as it's produced, up to `max_tokens` new tokens or the model's end-of-generation
-    /// token, whichever comes first. Returns the full generated text.
-    ///
-    /// # Errors
-    /// Returns an error if the prompt cannot be tokenized or a decode step fails.
     #[tracing::instrument(skip(self, prompt, on_token), fields(prompt_len = prompt.len()))]
     pub fn generate(
         &mut self,
@@ -160,6 +169,39 @@ impl LlamaEngine {
             "generation finished"
         );
         Ok(output)
+    }
+
+    #[tracing::instrument(skip(self, text), fields(text_len = text.len()))]
+    pub fn embed(&mut self, text: &str) -> Result<Vec<f32>, LlamaError> {
+        let embed_start = std::time::Instant::now();
+        let vocab = unsafe { self.lib.llama_model_get_vocab(self.model) };
+        let mut tokens = self.tokenize(vocab, text, true)?;
+
+        let batch = unsafe {
+            self.lib
+                .llama_batch_get_one(tokens.as_mut_ptr(), tokens.len() as i32)
+        };
+        let rc = unsafe { self.lib.llama_decode(self.ctx, batch) };
+        if rc != 0 {
+            tracing::error!(code = rc, "decode step failed");
+            return Err(LlamaError::Decode(rc));
+        }
+
+        let n_embd = unsafe { self.lib.llama_model_n_embd(self.model) };
+        let ptr = unsafe { self.lib.llama_get_embeddings_seq(self.ctx, 0) };
+        if ptr.is_null() || n_embd <= 0 {
+            return Err(LlamaError::EmbeddingUnavailable);
+        }
+
+        // SAFETY: llama.cpp guarantees `ptr` points to `n_embd` valid `f32`s when non-null.
+        let embedding = unsafe { std::slice::from_raw_parts(ptr, n_embd as usize) }.to_vec();
+
+        tracing::info!(
+            dims = embedding.len(),
+            elapsed_ms = embed_start.elapsed().as_millis(),
+            "embedding computed"
+        );
+        Ok(embedding)
     }
 
     fn tokenize(
