@@ -178,6 +178,11 @@ pub async fn call_tool(
 }
 
 #[tauri::command]
+pub fn list_tools(state: tauri::State<'_, ToolState>) -> Vec<tool::ToolSpec> {
+    state.executor.tool_specs()
+}
+
+#[tauri::command]
 pub fn respond_permission(
     request_id: u64,
     response: tool::PromptResponse,

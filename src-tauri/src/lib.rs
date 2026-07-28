@@ -120,6 +120,7 @@ pub fn run() {
             commands::rename_conversation,
             commands::delete_conversation,
             commands::call_tool,
+            commands::list_tools,
             commands::respond_permission,
             models::list_available_models,
             models::download_model,
