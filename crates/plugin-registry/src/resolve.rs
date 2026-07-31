@@ -1,7 +1,9 @@
 use std::path::{Path, PathBuf};
 
 use crate::{
-    load_engine_entries, load_model_entries, resolve_local_path, ModelKind, PluginRegistryError,
+    download_and_extract_zip, download_to_dir, load_engine_entries, load_model_entries,
+    resolve_download_url, resolve_local_path, DownloadSource, ModelEntry, ModelKind,
+    PluginRegistryError,
 };
 
 #[derive(Debug)]
@@ -12,13 +14,69 @@ pub struct ResolvedModel {
     pub engine_library_path: PathBuf,
 }
 
+pub fn resolve_engine_library_path(
+    registry_dir: &Path,
+    engines_cache_dir: &Path,
+    engine_id: &str,
+) -> Result<PathBuf, PluginRegistryError> {
+    let engines = load_engine_entries(registry_dir)?;
+    let engine_entry = engines
+        .into_iter()
+        .find(|e| e.id == engine_id)
+        .ok_or_else(|| PluginRegistryError::EngineNotFound(engine_id.to_string()))?;
+
+    if !engine_entry.download_url.ends_with(".zip") {
+        return resolve_local_path(&engine_entry.download_url, engines_cache_dir);
+    }
+
+    let library_file = engine_entry.library_file.as_deref().ok_or_else(|| {
+        PluginRegistryError::InvalidUrl(format!(
+            "engine {engine_id} downloads as a zip but has no library_file set"
+        ))
+    })?;
+
+    match resolve_download_url(&engine_entry.download_url)? {
+        DownloadSource::Local(path) => Ok(path),
+        DownloadSource::Remote(url) => {
+            let extract_dir = engines_cache_dir.join(&engine_entry.id);
+            download_and_extract_zip(&url, &extract_dir)?;
+            Ok(extract_dir.join(library_file))
+        }
+    }
+}
+
+pub fn resolve_model_entry_files(
+    entry: &ModelEntry,
+    models_cache_dir: &Path,
+) -> Result<PathBuf, PluginRegistryError> {
+    if entry.extra_files.is_empty() {
+        return resolve_local_path(&entry.download_url, models_cache_dir);
+    }
+
+    let model_dir = models_cache_dir.join(&entry.name);
+    let primary_path = match resolve_download_url(&entry.download_url)? {
+        DownloadSource::Local(path) => path,
+        DownloadSource::Remote(url) => download_to_dir(&url, &model_dir)?,
+    };
+    for extra_url in &entry.extra_files {
+        match resolve_download_url(extra_url)? {
+            DownloadSource::Local(_) => {}
+            DownloadSource::Remote(url) => {
+                download_to_dir(&url, &model_dir)?;
+            }
+        }
+    }
+    Ok(primary_path)
+}
+
 pub fn resolve_model_for_kind(
     registry_dir: &Path,
     models_cache_dir: &Path,
     engines_cache_dir: &Path,
     kind: ModelKind,
 ) -> Result<ResolvedModel, PluginRegistryError> {
-    let models = load_model_entries(registry_dir)?;
+    let mut models = load_model_entries(registry_dir)?;
+    models.sort_by(|a, b| a.name.cmp(&b.name));
     let model_entry = models
         .into_iter()
         .find(|m| m.kind == kind)

@@ -4,13 +4,12 @@ import type {
   CloudModel,
   ConversationSummary,
   CustomProviderConfig,
+  LocalModelInfo,
   McpServerConfig,
   ProviderInfo,
   SystemStats,
 } from "../types";
-import ProvidersTab from "./settings/ProvidersTab";
-import CustomProvidersTab from "./settings/CustomProvidersTab";
-import ModelsTab from "./settings/ModelsTab";
+import AiProvidersTab from "./settings/AiProvidersTab";
 import McpTab from "./settings/McpTab";
 import MemoryTab from "./settings/MemoryTab";
 import ToolsTab from "./settings/ToolsTab";
@@ -18,9 +17,7 @@ import ScheduledJobsTab from "./settings/ScheduledJobsTab";
 import FlowTemplatesTab from "./settings/FlowTemplatesTab";
 
 const TABS = [
-  "Providers & Keys",
-  "Local Engines & Models",
-  "Custom Providers",
+  "AI Providers",
   "MCP Servers",
   "Memory",
   "Tools",
@@ -39,6 +36,8 @@ interface SettingsModalProps {
   cloudModels: CloudModel[];
   models: CatalogModel[];
   refreshModels: () => void;
+  localModels: LocalModelInfo[];
+  refreshLocalModels: () => void;
   mcpServers: McpServerConfig[];
   refreshMcpServers: () => void;
   stats: SystemStats | null;
@@ -46,7 +45,7 @@ interface SettingsModalProps {
 }
 
 function SettingsModal(props: SettingsModalProps) {
-  const [tab, setTab] = useState<Tab>("Providers & Keys");
+  const [tab, setTab] = useState<Tab>("AI Providers");
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60">
@@ -75,16 +74,16 @@ function SettingsModal(props: SettingsModalProps) {
             </button>
           </div>
 
-          {tab === "Providers & Keys" && (
-            <ProvidersTab providers={props.providers} refresh={props.refreshProviders} />
-          )}
-          {tab === "Local Engines & Models" && (
-            <ModelsTab models={props.models} refresh={props.refreshModels} />
-          )}
-          {tab === "Custom Providers" && (
-            <CustomProvidersTab
+          {tab === "AI Providers" && (
+            <AiProvidersTab
+              providers={props.providers}
+              refreshProviders={props.refreshProviders}
               customProviders={props.customProviders}
-              refresh={props.refreshCustomProviders}
+              refreshCustomProviders={props.refreshCustomProviders}
+              catalogModels={props.models}
+              refreshCatalogModels={props.refreshModels}
+              localModels={props.localModels}
+              refreshLocalModels={props.refreshLocalModels}
             />
           )}
           {tab === "MCP Servers" && (

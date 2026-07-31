@@ -10,9 +10,6 @@ pub enum JobsError {
     Io(#[from] std::io::Error),
 }
 
-/// A user-defined recurring chat turn: firing `cron_expr` sends `prompt` (using cloud `model`
-/// if set, otherwise the local engine) into `conversation_id`, the same way a real chat message
-/// would — an unattended turn through the same tool-calling loop and flow FSM as a live chat.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct ScheduledJob {

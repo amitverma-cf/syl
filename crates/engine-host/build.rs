@@ -13,6 +13,8 @@ fn main() {
         .allowlist_function("llama_.*")
         .allowlist_type("llama_.*")
         .allowlist_var("LLAMA_.*")
+        .allowlist_function("gguf_.*")
+        .allowlist_type("gguf_.*")
         .derive_default(true)
         .layout_tests(false)
         .dynamic_library_name("LlamaCpp")
@@ -25,7 +27,6 @@ fn main() {
         .write_to_file(&out_path)
         .expect("failed to write llama.cpp bindings");
 
-    // ggml_backend_load_all_from_path lives in ggml.dll/libggml.so, not llama.dll/libllama.so.
     let ggml_bindings = bindgen::Builder::default()
         .header(wrapper.to_string_lossy())
         .clang_arg(format!("-I{}", vendor_dir.display()))
@@ -41,4 +42,25 @@ fn main() {
     ggml_bindings
         .write_to_file(&ggml_out_path)
         .expect("failed to write ggml backend bindings");
+
+    let sd_vendor_dir =
+        PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("vendor/stable-diffusion-cpp");
+    let sd_wrapper = sd_vendor_dir.join("wrapper.h");
+    println!("cargo:rerun-if-changed={}", sd_wrapper.display());
+
+    let sd_bindings = bindgen::Builder::default()
+        .header(sd_wrapper.to_string_lossy())
+        .clang_arg(format!("-I{}", sd_vendor_dir.display()))
+        .allowlist_file(".*stable-diffusion\\.h")
+        .derive_default(true)
+        .layout_tests(false)
+        .dynamic_library_name("StableDiffusionCpp")
+        .dynamic_link_require_all(false)
+        .generate()
+        .expect("failed to generate stable-diffusion.cpp bindings");
+
+    let sd_out_path = PathBuf::from(env::var("OUT_DIR").unwrap()).join("sd_bindings.rs");
+    sd_bindings
+        .write_to_file(&sd_out_path)
+        .expect("failed to write stable-diffusion.cpp bindings");
 }

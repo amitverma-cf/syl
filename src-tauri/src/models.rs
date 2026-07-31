@@ -51,8 +51,15 @@ pub async fn download_model(name: String) -> Result<(), String> {
             .into_iter()
             .find(|m| m.name == name)
             .ok_or_else(|| format!("no model named {name} in the registry"))?;
-        plugin_registry::resolve_local_path(&entry.download_url, &workspace_paths::models_dir())
-            .map_err(|e| e.to_string())?;
+        let path =
+            plugin_registry::resolve_model_entry_files(&entry, &workspace_paths::models_dir())
+                .map_err(|e| e.to_string())?;
+        if let Some(sha256) = &entry.sha256 {
+            if let Err(e) = plugin_registry::verify_sha256(&path, sha256) {
+                let _ = std::fs::remove_file(&path);
+                return Err(e.to_string());
+            }
+        }
         Ok(())
     })
     .await

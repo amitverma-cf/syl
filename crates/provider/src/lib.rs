@@ -8,13 +8,10 @@ pub use cloud::{build_client, chat_with_tools, stream_chat, CloudChatError};
 pub use custom::{
     add_custom_provider, list_custom_providers, CustomProviderConfig, CustomProviderError,
 };
-pub use keys::{list_providers, set_api_key, ProviderInfo};
+pub use keys::{list_providers, load_env_file, set_api_key, ProviderInfo};
 
 use std::path::Path;
 
-/// The static catalog plus every model discovered from a saved custom OpenAI-compatible
-/// provider, with IDs prefixed `custom::<provider>::<model>` so `build_client`'s
-/// `ServiceTargetResolver` can route them to the right base URL.
 pub fn list_all_models(custom_providers_file: &Path) -> Vec<CloudModel> {
     let mut models = catalog::list_cloud_models();
     for provider in custom::list_custom_providers(custom_providers_file) {

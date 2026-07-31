@@ -4,7 +4,7 @@
     "states": [
         {
             "name": "chatting",
-            "system_prompt": "You are a helpful assistant with access to tools. Use a tool when it would genuinely help answer the user's request (e.g. reading or writing a file, or running a command); otherwise just respond directly.",
+            "system_prompt": "",
             "tool_allowlist": [],
             "transitions": [{ "on": "message", "to_state": "chatting" }]
         }

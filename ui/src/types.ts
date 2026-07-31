@@ -25,7 +25,7 @@ export interface PermissionRequest {
 
 export interface CatalogModel {
   name: string;
-  kind: "chat" | "embedding";
+  kind: "chat" | "embedding" | "image" | "asr" | "tts";
   sizeBytes: number;
   quantization: string;
   requiredEngine: string;
@@ -85,6 +85,13 @@ export interface ToolSpec {
   name: string;
   description: string;
   inputSchema: unknown;
+}
+
+export interface LocalModelInfo {
+  name: string;
+  sizeBytes: number;
+  loaded: boolean;
+  kind: "chat" | "embedding" | "image" | "asr" | "tts" | null;
 }
 
 export interface ScheduledJob {

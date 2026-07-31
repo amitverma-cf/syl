@@ -41,20 +41,12 @@ pub enum Permission {
 #[async_trait]
 pub trait Tool: Send + Sync {
     fn name(&self) -> &str;
-    /// A model-facing description of what the tool does — this is what a real tool-calling
-    /// model uses to decide *when* to call it, so it should be prescriptive ("call this when
-    /// the user asks to read a file"), not just descriptive.
     fn description(&self) -> &str;
-    /// JSON Schema for the tool's arguments (`{"type": "object", "properties": {...}}`) — fed
-    /// to whichever tool-calling mechanism the active model uses (native for cloud/custom
-    /// providers via `genai`, prompt-embedded for local models).
     fn input_schema(&self) -> serde_json::Value;
     fn required_permission(&self) -> Permission;
     async fn call(&self, args: serde_json::Value) -> Result<serde_json::Value, ToolError>;
 }
 
-/// A tool's model-facing shape (name/description/schema), independent of any particular
-/// `Tool` instance — what a tool-calling loop needs to hand to a model.
 #[derive(Debug, Clone, serde::Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct ToolSpec {
@@ -104,8 +96,6 @@ impl ToolExecutor {
         }
     }
 
-    /// Takes `&self` (not `&mut self`) so tools can be registered after startup — e.g. an MCP
-    /// server's tools, discovered only once the user connects it from the running app.
     pub fn register(&self, tool: Arc<dyn Tool>) {
         self.tools
             .write()
@@ -121,8 +111,6 @@ impl ToolExecutor {
         self.tools.read().unwrap().keys().cloned().collect()
     }
 
-    /// Model-facing specs for every registered tool — what a tool-calling loop hands to the
-    /// model so it can decide which tool, if any, to call.
     pub fn tool_specs(&self) -> Vec<ToolSpec> {
         self.tools
             .read()
@@ -136,9 +124,6 @@ impl ToolExecutor {
             .collect()
     }
 
-    /// Same as [`Self::tool_specs`], but scoped to a flow state's `tool_allowlist` — an empty
-    /// allowlist means "no restriction" (every registered tool is allowed), matching the
-    /// `default` flow's intent of giving the assistant everything available.
     pub fn tool_specs_filtered(&self, allowlist: &[String]) -> Vec<ToolSpec> {
         let specs = self.tool_specs();
         if allowlist.is_empty() {

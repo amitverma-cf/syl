@@ -7,9 +7,6 @@ use tool::{McpServerConfig, McpToolBridge, McpToolDescriptor, McpTransportConfig
 
 use crate::ToolState;
 
-/// Tracks which qualified tool names came from which connected MCP server, so a server can be
-/// disconnected (and its tools unregistered from the shared `ToolExecutor`) without restarting
-/// the app.
 #[derive(Default)]
 pub struct McpState {
     server_tool_names: Mutex<HashMap<String, Vec<String>>>,
@@ -39,11 +36,7 @@ pub async fn add_mcp_server(
     for bridge in bridges {
         tool_state.executor.register(std::sync::Arc::new(bridge));
     }
-    mcp_state
-        .server_tool_names
-        .lock()
-        .unwrap()
-        .insert(name.clone(), tool_names);
+    crate::sync::lock(&mcp_state.server_tool_names).insert(name.clone(), tool_names);
 
     let path = workspace_paths::mcp_servers_file();
     let mut servers = tool::load_mcp_servers(&path);
@@ -60,7 +53,7 @@ pub fn remove_mcp_server(
     tool_state: tauri::State<'_, ToolState>,
     mcp_state: tauri::State<'_, McpState>,
 ) -> Result<(), String> {
-    if let Some(tool_names) = mcp_state.server_tool_names.lock().unwrap().remove(&name) {
+    if let Some(tool_names) = crate::sync::lock(&mcp_state.server_tool_names).remove(&name) {
         for tool_name in tool_names {
             tool_state.executor.unregister(&tool_name);
         }
@@ -72,8 +65,6 @@ pub fn remove_mcp_server(
     tool::save_mcp_servers(&path, &servers).map_err(|e| e.to_string())
 }
 
-/// Reconnects every MCP server saved from a previous run. Failures are logged, not fatal —
-/// a server that's since become unreachable shouldn't block the rest of the app from starting.
 pub fn reconnect_saved_servers(app: &tauri::AppHandle) {
     let servers = tool::load_mcp_servers(&workspace_paths::mcp_servers_file());
     if servers.is_empty() {
@@ -91,10 +82,7 @@ pub fn reconnect_saved_servers(app: &tauri::AppHandle) {
                     for bridge in bridges {
                         tool_state.executor.register(std::sync::Arc::new(bridge));
                     }
-                    mcp_state
-                        .server_tool_names
-                        .lock()
-                        .unwrap()
+                    crate::sync::lock(&mcp_state.server_tool_names)
                         .insert(config.name.clone(), tool_names);
                     tracing::info!(server = %config.name, "reconnected saved MCP server");
                 }

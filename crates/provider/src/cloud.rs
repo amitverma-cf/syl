@@ -1,5 +1,6 @@
 use std::path::Path;
 
+use core_types::app_config::app_config;
 use futures_util::StreamExt;
 use genai::adapter::AdapterKind;
 use genai::chat::{
@@ -11,10 +12,6 @@ use genai::{Client, ModelIden, ServiceTarget};
 use crate::custom::list_custom_providers;
 use crate::keys::load_env_file;
 
-/// Hard cap on how many tool-call round trips [`chat_with_tools`] will make for a single user
-/// turn before giving up — guards against a model that keeps calling tools indefinitely.
-const MAX_TOOL_ITERATIONS: u32 = 8;
-
 #[derive(Debug, thiserror::Error)]
 pub enum CloudChatError {
     #[error("no API key configured for this provider")]
@@ -25,13 +22,8 @@ pub enum CloudChatError {
     ToolIterationLimitExceeded(u32),
 }
 
-/// The model-ID prefix used for custom OpenAI-compatible providers: `custom::<provider>::<model>`.
 const CUSTOM_PREFIX: &str = "custom::";
 
-/// Builds a `genai` client whose API keys come from the app's own `.syl/.env` file rather
-/// than the process environment — keys are entered once in Settings and persisted there.
-/// Also routes any `custom::<provider>::<model>` model ID to that provider's saved base URL
-/// (an OpenAI-compatible endpoint added via `add_custom_provider`) instead of a built-in adapter.
 pub fn build_client(env_file: &Path, custom_providers_file: &Path) -> Client {
     let entries = load_env_file(env_file);
     let auth_entries = entries.clone();
@@ -79,8 +71,6 @@ pub fn build_client(env_file: &Path, custom_providers_file: &Path) -> Client {
         .build()
 }
 
-/// Streams a single-turn chat completion from a cloud model, invoking `on_piece` for each
-/// text chunk as it arrives, and returns the full accumulated response text.
 pub async fn stream_chat(
     client: &Client,
     model_id: &str,
@@ -109,12 +99,6 @@ pub async fn stream_chat(
     Ok(full_text)
 }
 
-/// Runs a model-driven tool-calling turn using `genai`'s native tool-calling support: the
-/// model itself decides whether to call a tool, we execute it through `executor` (permission
-/// gate still applies) and feed the result back, repeating until the model returns a
-/// text-only answer or [`MAX_TOOL_ITERATIONS`] is exceeded. The final answer is delivered
-/// whole via `on_piece` rather than token-by-token, since whether a turn ends in a tool call
-/// or text can't be known until the full response is in.
 #[allow(clippy::too_many_arguments)]
 pub async fn chat_with_tools(
     client: &Client,
@@ -141,7 +125,8 @@ pub async fn chat_with_tools(
         })
         .collect();
 
-    for _ in 0..MAX_TOOL_ITERATIONS {
+    let max_tool_iterations = app_config().max_tool_iterations;
+    for _ in 0..max_tool_iterations {
         let mut request = ChatRequest::new(messages.clone());
         if !genai_tools.is_empty() {
             request = request.with_tools(genai_tools.clone());
@@ -170,6 +155,6 @@ pub async fn chat_with_tools(
     }
 
     Err(CloudChatError::ToolIterationLimitExceeded(
-        MAX_TOOL_ITERATIONS,
+        max_tool_iterations,
     ))
 }

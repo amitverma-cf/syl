@@ -1,5 +1,6 @@
 use std::sync::Arc;
 
+use core_types::app_config::app_config;
 use core_types::workspace_paths;
 use daemon::events::DaemonEvent;
 use engine_host::llama::LlamaEngine;
@@ -9,7 +10,8 @@ use tauri::ipc::Channel;
 use tool::ToolExecutor;
 
 use crate::daemon::DaemonState;
-use crate::flows::{FlowState, DEFAULT_FLOW_NAME};
+use crate::flows::{default_flow_name, FlowState};
+use crate::local_models::LocalModelState;
 use crate::{AppState, ToolState};
 
 #[derive(Clone, serde::Serialize)]
@@ -22,16 +24,25 @@ pub enum GenerationEvent {
 
 #[tauri::command]
 #[allow(clippy::too_many_arguments)]
-#[tracing::instrument(skip(on_event, state, tool_state, flow_state, daemon_state))]
+#[tracing::instrument(skip(
+    on_event,
+    state,
+    tool_state,
+    flow_state,
+    daemon_state,
+    local_model_state
+))]
 pub async fn generate(
     prompt: String,
     conversation_id: String,
     model: Option<String>,
+    local_model: Option<String>,
     on_event: Channel<GenerationEvent>,
     state: tauri::State<'_, AppState>,
     tool_state: tauri::State<'_, ToolState>,
     flow_state: tauri::State<'_, FlowState>,
     daemon_state: tauri::State<'_, DaemonState>,
+    local_model_state: tauri::State<'_, LocalModelState>,
 ) -> Result<(), String> {
     let store = state.conversation_store.clone();
 
@@ -40,8 +51,18 @@ pub async fn generate(
         .executor
         .tool_specs_filtered(&flow_turn.tool_allowlist);
 
+    tracing::info!(
+        %conversation_id,
+        cloud_model = model.as_deref().unwrap_or(""),
+        local_model = local_model.as_deref().unwrap_or(""),
+        tool_count = tool_specs.len(),
+        prompt_len = prompt.len(),
+        "generate turn starting"
+    );
+
     let conversation_id_for_store = conversation_id.clone();
     let cloud_model = model.filter(|m| !m.is_empty());
+    let local_model_name = local_model.filter(|m| !m.is_empty());
     let piece_event = on_event.clone();
     let generation_result = match cloud_model {
         Some(model_id) => {
@@ -60,19 +81,41 @@ pub async fn generate(
         None => {
             let executor = tool_state.executor.clone();
             let system_prompt = flow_turn.system_prompt.clone();
-            tauri::async_runtime::spawn_blocking(move || {
-                run_generate(
-                    &store,
-                    &conversation_id_for_store,
-                    &prompt,
-                    &system_prompt,
-                    &tool_specs,
-                    &executor,
-                    move |piece| send_piece(&piece_event, piece),
-                )
-            })
-            .await
-            .map_err(|e| e.to_string())?
+            match local_model_name {
+                Some(name) => {
+                    let engine = local_model_state.get_loaded(&name).ok_or_else(|| {
+                        format!("local model {name} is not loaded; load it first in Settings")
+                    })?;
+                    tauri::async_runtime::spawn_blocking(move || {
+                        let mut engine = crate::sync::lock(&engine);
+                        run_generate_with_engine(
+                            &mut engine,
+                            &store,
+                            &conversation_id_for_store,
+                            &prompt,
+                            &system_prompt,
+                            &tool_specs,
+                            &executor,
+                            move |piece| send_piece(&piece_event, piece),
+                        )
+                    })
+                    .await
+                    .map_err(|e| e.to_string())?
+                }
+                None => tauri::async_runtime::spawn_blocking(move || {
+                    run_generate(
+                        &store,
+                        &conversation_id_for_store,
+                        &prompt,
+                        &system_prompt,
+                        &tool_specs,
+                        &executor,
+                        move |piece| send_piece(&piece_event, piece),
+                    )
+                })
+                .await
+                .map_err(|e| e.to_string())?,
+            }
         }
     };
 
@@ -135,7 +178,7 @@ pub fn create_conversation(
 ) -> Result<(), String> {
     state
         .conversation_store
-        .create_conversation(&id, &title, DEFAULT_FLOW_NAME)
+        .create_conversation(&id, &title, default_flow_name())
         .map_err(|e| e.to_string())
 }
 
@@ -191,10 +234,6 @@ pub fn respond_permission(
     state.prompter.resolve(request_id, response);
 }
 
-/// Runs one cloud/custom-model tool-calling turn: appends the user message, drives
-/// `provider::chat_with_tools` (streaming pieces via `on_piece`), and appends the assistant's
-/// final answer. Shared by the live `generate` command (`on_piece` forwards to the UI's
-/// `Channel`) and unattended scheduled-job firings (`on_piece` is a no-op).
 #[tracing::instrument(skip(store, tools, executor, on_piece))]
 #[allow(clippy::too_many_arguments)]
 pub(crate) async fn run_generate_cloud(
@@ -245,11 +284,49 @@ pub(crate) async fn run_generate_cloud(
     Ok(())
 }
 
-/// Local-model counterpart of [`run_generate_cloud`] — same shape, but drives
-/// `engine_host::tool_loop::generate_with_tools` against a locally loaded llama.cpp model.
 #[tracing::instrument(skip(store, tools, executor, on_piece))]
 #[allow(clippy::too_many_arguments)]
 pub(crate) fn run_generate(
+    store: &Arc<SqliteConversationStore>,
+    conversation_id: &str,
+    prompt: &str,
+    system_prompt: &str,
+    tools: &[tool::ToolSpec],
+    executor: &ToolExecutor,
+    on_piece: impl FnMut(&str),
+) -> Result<(), String> {
+    let resolved = plugin_registry::resolve_model_for_kind(
+        &workspace_paths::registry_dir(),
+        &workspace_paths::models_dir(),
+        &workspace_paths::engines_dir(),
+        ModelKind::Chat,
+    )
+    .map_err(|e| e.to_string())?;
+
+    let mut engine = LlamaEngine::load(
+        &resolved.engine_library_path,
+        &resolved.model_path,
+        app_config().local_engine.context_size,
+        false,
+    )
+    .map_err(|e| e.to_string())?;
+
+    run_generate_with_engine(
+        &mut engine,
+        store,
+        conversation_id,
+        prompt,
+        system_prompt,
+        tools,
+        executor,
+        on_piece,
+    )
+}
+
+#[tracing::instrument(skip(engine, store, tools, executor, on_piece))]
+#[allow(clippy::too_many_arguments)]
+pub(crate) fn run_generate_with_engine(
+    engine: &mut LlamaEngine,
     store: &Arc<SqliteConversationStore>,
     conversation_id: &str,
     prompt: &str,
@@ -262,30 +339,14 @@ pub(crate) fn run_generate(
         .append_message(conversation_id, "user", prompt)
         .map_err(|e| e.to_string())?;
 
-    let resolved = plugin_registry::resolve_model_for_kind(
-        &workspace_paths::registry_dir(),
-        &workspace_paths::models_dir(),
-        &workspace_paths::engines_dir(),
-        ModelKind::Chat,
-    )
-    .map_err(|e| e.to_string())?;
-
-    let mut engine = LlamaEngine::load(
-        &resolved.engine_library_path,
-        &resolved.model_path,
-        2048,
-        false,
-    )
-    .map_err(|e| e.to_string())?;
-
     let response = engine_host::tool_loop::generate_with_tools(
-        &mut engine,
+        engine,
         system_prompt,
         prompt,
         tools,
         executor,
         conversation_id,
-        128,
+        app_config().local_engine.max_tokens,
         |piece| on_piece(piece),
     )?;
 

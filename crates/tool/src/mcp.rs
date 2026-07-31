@@ -6,9 +6,6 @@ use rmcp::{RoleClient, ServiceExt};
 
 use crate::{Permission, Tool, ToolError};
 
-/// A connected MCP server can be local (spawned as a stdio child process — most desktop MCP
-/// servers) or remote (Streamable HTTP, the current MCP transport for hosted servers like
-/// Linear, GitHub, Notion, etc. — the old separate "SSE transport" is superseded by this).
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 #[serde(rename_all = "camelCase", tag = "transport")]
 pub enum McpTransportConfig {
@@ -59,9 +56,6 @@ pub struct McpToolDescriptor {
     pub input_schema: serde_json::Value,
 }
 
-/// Bridges one tool exposed by a connected MCP server into this app's own `Tool` trait, so
-/// MCP tools flow through the same permission gate and `ToolExecutor` as native tools —
-/// callers don't need to know a tool came from MCP rather than being built in.
 pub struct McpToolBridge {
     qualified_name: String,
     tool_name: String,
@@ -71,10 +65,6 @@ pub struct McpToolBridge {
 }
 
 impl McpToolBridge {
-    /// Connects to an MCP server — over stdio (spawning `command args...` as a child process)
-    /// or over Streamable HTTP (the current MCP transport for remote/hosted servers) depending
-    /// on `config.transport` — and returns one bridge per tool the server advertises, plus
-    /// their schemas for display.
     pub async fn connect(
         config: &McpServerConfig,
     ) -> Result<(Vec<Self>, Vec<McpToolDescriptor>), ToolError> {
@@ -138,8 +128,6 @@ impl McpToolBridge {
 #[async_trait::async_trait]
 impl Tool for McpToolBridge {
     fn name(&self) -> &str {
-        // Namespaced by server name (`mcp::<server>::<tool>`) so two MCP servers can't
-        // collide on a tool name inside `ToolExecutor`'s single flat tool map.
         &self.qualified_name
     }
 
@@ -152,8 +140,6 @@ impl Tool for McpToolBridge {
     }
 
     fn required_permission(&self) -> Permission {
-        // MCP servers are arbitrary third-party code with real side effects (filesystem,
-        // network, other services) — always ask, same posture as run_command.
         Permission::Ask
     }
 

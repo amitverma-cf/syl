@@ -21,7 +21,7 @@ function FlowTemplatesTab({ activeConversationId }: FlowTemplatesTabProps) {
     if (!activeConversationId) return;
     invoke<FlowStateInfo | null>("flow_status", { conversationId: activeConversationId })
       .then(setActiveFlow)
-      .catch(() => {});
+      .catch((err) => setError(String(err)));
   }, [activeConversationId]);
 
   async function handleLoad(name: string) {

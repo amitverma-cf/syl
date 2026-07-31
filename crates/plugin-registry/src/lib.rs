@@ -1,8 +1,12 @@
 mod fetch;
 mod resolve;
 
-pub use fetch::{download_to_cache, fetch_remote_registry, is_cached};
-pub use resolve::{resolve_model_for_kind, ResolvedModel};
+pub use fetch::{
+    download_and_extract_zip, download_to_cache, download_to_dir, fetch_remote_registry, is_cached,
+};
+pub use resolve::{
+    resolve_engine_library_path, resolve_model_entry_files, resolve_model_for_kind, ResolvedModel,
+};
 
 use std::path::{Path, PathBuf};
 
@@ -30,6 +34,8 @@ pub enum PluginRegistryError {
     NoModelAvailable(ModelKind),
     #[error("model {model} requires engine {engine}, which is not available")]
     NoEngineAvailable { model: String, engine: String },
+    #[error("engine {0} is not registered")]
+    EngineNotFound(String),
     #[error("network error fetching {url}: {source}")]
     Network {
         url: String,
@@ -38,6 +44,12 @@ pub enum PluginRegistryError {
     },
     #[error("http error {status} fetching {url}")]
     Http { url: String, status: u16 },
+    #[error("checksum mismatch for {}: expected {expected}, got {actual}", .path.display())]
+    ChecksumMismatch {
+        path: PathBuf,
+        expected: String,
+        actual: String,
+    },
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
@@ -45,6 +57,9 @@ pub enum PluginRegistryError {
 pub enum ModelKind {
     Chat,
     Embedding,
+    Image,
+    Asr,
+    Tts,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -54,6 +69,11 @@ pub struct EngineEntry {
     pub platform: String,
     pub download_url: String,
     pub sha256: Option<String>,
+    /// Relative path to the loadable library within the archive, required when
+    /// `download_url` points at a `.zip` (engines are typically distributed as a
+    /// zip of the main library plus its sibling backend DLLs).
+    #[serde(default)]
+    pub library_file: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -65,6 +85,8 @@ pub struct ModelEntry {
     pub required_engine: String,
     pub download_url: String,
     pub sha256: Option<String>,
+    #[serde(default)]
+    pub extra_files: Vec<String>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -74,15 +96,23 @@ pub enum DownloadSource {
 }
 
 pub fn load_engine_entries(registry_dir: &Path) -> Result<Vec<EngineEntry>, PluginRegistryError> {
-    let mut entries = load_json_array(&registry_dir.join("engines.json"))?;
-    entries.extend(load_local_engine_entries(registry_dir)?);
-    Ok(entries)
+    let base = load_json_array(&registry_dir.join("engines.json"))?;
+    let local = load_local_engine_entries(registry_dir)?;
+    Ok(override_by_key(base, local, |entry| entry.id.clone()))
 }
 
 pub fn load_model_entries(registry_dir: &Path) -> Result<Vec<ModelEntry>, PluginRegistryError> {
-    let mut entries = load_json_array(&registry_dir.join("models.json"))?;
-    entries.extend(load_local_model_entries(registry_dir)?);
-    Ok(entries)
+    let base = load_json_array(&registry_dir.join("models.json"))?;
+    let local = load_local_model_entries(registry_dir)?;
+    Ok(override_by_key(base, local, |entry| entry.name.clone()))
+}
+
+fn override_by_key<T>(base: Vec<T>, overrides: Vec<T>, key: impl Fn(&T) -> String) -> Vec<T> {
+    let override_keys: std::collections::HashSet<String> = overrides.iter().map(&key).collect();
+    base.into_iter()
+        .filter(|entry| !override_keys.contains(&key(entry)))
+        .chain(overrides)
+        .collect()
 }
 
 pub fn load_local_engine_entries(dir: &Path) -> Result<Vec<EngineEntry>, PluginRegistryError> {
@@ -134,6 +164,31 @@ pub fn resolve_local_path(url: &str, cache_dir: &Path) -> Result<PathBuf, Plugin
     match resolve_download_url(url)? {
         DownloadSource::Local(path) => Ok(path),
         DownloadSource::Remote(url) => download_to_cache(&url, cache_dir),
+    }
+}
+
+pub fn verify_sha256(path: &Path, expected_hex: &str) -> Result<(), PluginRegistryError> {
+    use sha2::{Digest, Sha256};
+
+    let mut file = std::fs::File::open(path).map_err(|source| PluginRegistryError::Io {
+        path: path.to_path_buf(),
+        source,
+    })?;
+    let mut hasher = Sha256::new();
+    std::io::copy(&mut file, &mut hasher).map_err(|source| PluginRegistryError::Io {
+        path: path.to_path_buf(),
+        source,
+    })?;
+    let actual = format!("{:x}", hasher.finalize());
+
+    if actual.eq_ignore_ascii_case(expected_hex) {
+        Ok(())
+    } else {
+        Err(PluginRegistryError::ChecksumMismatch {
+            path: path.to_path_buf(),
+            expected: expected_hex.to_string(),
+            actual,
+        })
     }
 }
 
