@@ -1,7 +1,11 @@
+mod audio;
 mod bootstrap;
 mod commands;
 mod daemon;
+mod embeddings;
 mod flows;
+mod images;
+mod local_models;
 mod logging;
 mod mcp;
 mod models;
@@ -9,6 +13,8 @@ mod observability;
 mod permission;
 mod providers;
 mod scheduled_jobs;
+mod speech;
+mod sync;
 
 use std::sync::Arc;
 
@@ -55,8 +61,6 @@ pub fn run() {
         })
         .on_window_event(|window, event| {
             if let WindowEvent::CloseRequested { api, .. } = event {
-                // Hide instead of quitting so the daemon (cron jobs, event bus) keeps running
-                // in the background — matches the tray-resident, not-a-true-OS-service design.
                 let _ = window.hide();
                 api.prevent_close();
             }
@@ -88,6 +92,11 @@ pub fn run() {
             app.manage(observability_state);
 
             app.manage(flows::FlowState::default());
+            app.manage(local_models::LocalModelState::default());
+            app.manage(images::SdModelState::default());
+            app.manage(embeddings::OnnxModelState::default());
+            app.manage(speech::OnnxAsrState::default());
+            app.manage(speech::OnnxTtsState::default());
 
             app.manage(DaemonState::default());
             tauri::async_runtime::spawn(daemon::spawn(app.handle().clone()));
@@ -120,9 +129,27 @@ pub fn run() {
             commands::rename_conversation,
             commands::delete_conversation,
             commands::call_tool,
+            commands::list_tools,
             commands::respond_permission,
             models::list_available_models,
             models::download_model,
+            local_models::list_local_models,
+            local_models::set_local_model_kind,
+            local_models::load_local_model,
+            local_models::unload_local_model,
+            local_models::delete_local_model,
+            images::load_image_model,
+            images::unload_image_model,
+            images::generate_image,
+            embeddings::load_embedding_model,
+            embeddings::unload_embedding_model,
+            embeddings::embed_text,
+            speech::load_asr_model,
+            speech::unload_asr_model,
+            speech::load_tts_model,
+            speech::unload_tts_model,
+            speech::transcribe_recording,
+            speech::speak_text,
             observability::system_stats,
             flows::list_flows,
             flows::load_flow,

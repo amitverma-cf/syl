@@ -1,4 +1,4 @@
-use provider::{list_providers, set_api_key};
+use provider::{list_providers, load_env_file, set_api_key};
 
 fn temp_env_path(name: &str) -> std::path::PathBuf {
     std::env::temp_dir().join(format!(
@@ -47,6 +47,26 @@ fn set_api_key_twice_updates_the_same_key_without_duplicating_it() {
     assert_eq!(contents.matches("OPENAI_API_KEY").count(), 1);
     assert!(contents.contains("sk-new"));
     assert!(!contents.contains("sk-old"));
+
+    std::fs::remove_file(&path).ok();
+}
+
+#[test]
+fn load_env_file_strips_surrounding_double_or_single_quotes() {
+    let path = temp_env_path("quoted");
+    std::fs::write(
+        &path,
+        "BASE_URL=\"https://integrate.api.nvidia.com\"\nAPI_KEY='nvapi-abc123'\nPLAIN=unquoted\n",
+    )
+    .unwrap();
+
+    let entries = load_env_file(&path);
+    assert_eq!(
+        entries.get("BASE_URL").unwrap(),
+        "https://integrate.api.nvidia.com"
+    );
+    assert_eq!(entries.get("API_KEY").unwrap(), "nvapi-abc123");
+    assert_eq!(entries.get("PLAIN").unwrap(), "unquoted");
 
     std::fs::remove_file(&path).ok();
 }

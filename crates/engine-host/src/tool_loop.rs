@@ -1,19 +1,8 @@
+use core_types::app_config::app_config;
 use serde_json::Value;
 
 use crate::llama::LlamaEngine;
 
-/// Hard cap on how many tool-call round trips [`generate_with_tools`] will make for a single
-/// user turn before giving up — mirrors `provider::cloud::chat_with_tools`'s cap, but local
-/// models have no native tool-calling API, so this loop uses a prompt-engineered convention
-/// instead: the model is instructed to emit a fenced ` ```tool_call ``` ` block to call a tool.
-const MAX_TOOL_ITERATIONS: u32 = 8;
-
-/// Runs a model-driven tool-calling turn against a local llama.cpp model using a
-/// prompt-engineered JSON convention (local models have no native tool-calling support): the
-/// model is instructed to emit a fenced `tool_call` block to request a tool, which is parsed
-/// out of the generated text, executed through `executor`, and fed back into the prompt as
-/// `Tool output: ...` before generating again — repeating until the model produces a response
-/// with no tool-call block, or [`MAX_TOOL_ITERATIONS`] is exceeded.
 #[allow(clippy::too_many_arguments)]
 pub fn generate_with_tools(
     engine: &mut LlamaEngine,
@@ -30,7 +19,8 @@ pub fn generate_with_tools(
         tool_catalog_prompt(tools)
     );
 
-    for _ in 0..MAX_TOOL_ITERATIONS {
+    let max_tool_iterations = app_config().max_tool_iterations;
+    for _ in 0..max_tool_iterations {
         let output = engine
             .generate(&running_prompt, max_tokens, &mut on_piece)
             .map_err(|e| e.to_string())?;
@@ -51,7 +41,7 @@ pub fn generate_with_tools(
     }
 
     Err(format!(
-        "tool-calling loop exceeded {MAX_TOOL_ITERATIONS} iterations without a final answer"
+        "tool-calling loop exceeded {max_tool_iterations} iterations without a final answer"
     ))
 }
 

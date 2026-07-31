@@ -6,9 +6,6 @@ pub struct CloudModel {
     pub label: String,
 }
 
-/// A starter catalog of stable model IDs per provider, for the UI's model picker. Users can
-/// also type any other model ID `genai` can resolve (it dispatches by name prefix — see
-/// `genai::adapter::AdapterKind`), so this list is a convenience, not an allowlist.
 pub fn list_cloud_models() -> Vec<CloudModel> {
     vec![
         CloudModel {

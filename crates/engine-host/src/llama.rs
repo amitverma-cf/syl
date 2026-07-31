@@ -1,27 +1,8 @@
-use std::ffi::{c_char, CString};
+use std::ffi::c_char;
 use std::path::Path;
 
 use crate::bindings::LlamaCpp;
-use crate::ggml_bindings::GgmlBackend;
-
-#[cfg(target_os = "windows")]
-extern "system" {
-    fn SetDllDirectoryW(lp_path_name: *const u16) -> i32;
-}
-
-#[cfg(target_os = "windows")]
-fn prioritize_dll_directory(dir: &Path) {
-    use std::os::windows::ffi::OsStrExt;
-    let wide: Vec<u16> = dir
-        .as_os_str()
-        .encode_wide()
-        .chain(std::iter::once(0))
-        .collect();
-    unsafe { SetDllDirectoryW(wide.as_ptr()) };
-}
-
-#[cfg(not(target_os = "windows"))]
-fn prioritize_dll_directory(_dir: &Path) {}
+use crate::dll::{load_ggml_backends, path_to_cstring, prioritize_dll_directory};
 
 #[derive(Debug, thiserror::Error)]
 pub enum LlamaError {
@@ -71,13 +52,8 @@ impl LlamaEngine {
         // SAFETY: must be called once before any other llama.cpp function.
         unsafe { lib.llama_backend_init() };
 
-        // llama.cpp's ggml_backend_load_all_from_path lives in ggml.dll/libggml.so, not in
-        // llama.dll/libllama.so itself — a separate dynamic-loading binding is required.
         let backend_dir_buf = library_path.parent().unwrap_or_else(|| Path::new("."));
-        let backend_dir = path_to_cstring(backend_dir_buf);
-        let ggml_base_path = backend_dir_buf.join(ggml_base_library_name());
-        let ggml = unsafe { GgmlBackend::new(&ggml_base_path) }.map_err(LlamaError::LibraryLoad)?;
-        unsafe { ggml.ggml_backend_load_all_from_path(backend_dir.as_ptr()) };
+        load_ggml_backends(backend_dir_buf).map_err(LlamaError::LibraryLoad)?;
 
         let model_path_c = path_to_cstring(model_path);
         let model_params = unsafe { lib.llama_model_default_params() };
@@ -260,19 +236,5 @@ impl Drop for LlamaEngine {
             self.lib.llama_model_free(self.model);
             self.lib.llama_backend_free();
         }
-    }
-}
-
-fn path_to_cstring(path: &Path) -> CString {
-    CString::new(path.to_string_lossy().as_bytes()).unwrap_or_default()
-}
-
-fn ggml_base_library_name() -> &'static str {
-    if cfg!(target_os = "windows") {
-        "ggml.dll"
-    } else if cfg!(target_os = "macos") {
-        "libggml.dylib"
-    } else {
-        "libggml.so"
     }
 }

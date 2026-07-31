@@ -30,9 +30,6 @@ impl FlowRunner {
         self.current_state().on_enter_tool_call.as_ref()
     }
 
-    /// Advances to the state reached by the first transition matching `trigger` from the
-    /// current state. Returns `true` if a transition fired, `false` if the current state has
-    /// no matching transition (the flow stays put).
     pub fn advance(&mut self, trigger: &str) -> bool {
         let Some(transition) = self
             .current_state()
@@ -43,7 +40,6 @@ impl FlowRunner {
             return false;
         };
         let to_state = transition.to_state.clone();
-        // `to_state` is guaranteed to exist by `validate_semantics` at parse time.
         self.current_index = self
             .flow
             .states

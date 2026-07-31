@@ -2,13 +2,12 @@ use std::future::Future;
 use std::pin::Pin;
 use std::sync::Arc;
 
+use core_types::app_config::app_config;
 use daemon::events::{DaemonEvent, EventBus};
 use daemon::scheduler::CronScheduler;
 use tauri::{AppHandle, Manager};
 
 use crate::scheduled_jobs::{register_persisted_jobs, SchedulerState};
-
-const REGISTRY_BASE_URL: &str = "https://raw.githubusercontent.com/amitverma-cf/syl/main/registry";
 
 pub struct DaemonState {
     pub event_bus: Arc<EventBus>,
@@ -22,10 +21,6 @@ impl Default for DaemonState {
     }
 }
 
-/// Starts the background scheduler, registers the registry-poll job plus every persisted
-/// user-defined scheduled job, and manages the running scheduler as app state so commands can
-/// add/remove jobs at runtime. Runs independent of whether the main window is open, so it must
-/// be spawned once at app startup, not lazily on first UI interaction.
 pub async fn spawn(app: AppHandle) {
     let event_bus = app.state::<DaemonState>().event_bus.clone();
 
@@ -64,7 +59,7 @@ pub async fn spawn(app: AppHandle) {
 
 async fn poll_registry(event_bus: Arc<EventBus>) {
     let result = tauri::async_runtime::spawn_blocking(|| {
-        plugin_registry::fetch_remote_registry(REGISTRY_BASE_URL)
+        plugin_registry::fetch_remote_registry(&app_config().registry_poll_url)
     })
     .await;
     match result {

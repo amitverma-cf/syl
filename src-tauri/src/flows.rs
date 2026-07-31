@@ -1,36 +1,29 @@
 use std::collections::HashMap;
 use std::sync::Mutex;
 
+use core_types::app_config::app_config;
 use core_types::workspace_paths;
 use executor::FlowRunner;
 
-/// The flow every new conversation starts on, unless the user picks a different one — its
-/// definition ships in the repo-root `flows/` directory like every other flow (see
-/// `flows/default.json`).
-pub const DEFAULT_FLOW_NAME: &str = "default";
+pub fn default_flow_name() -> &'static str {
+    &app_config().default_flow_name
+}
 
-/// One `FlowRunner` per conversation — conversations run independent flow instances, not a
-/// single global flow, so switching between chats doesn't reset or share state.
 #[derive(Default)]
 pub struct FlowState {
     runners: Mutex<HashMap<String, FlowRunner>>,
 }
 
-/// What a chat turn needs from the active flow: the system prompt and the state's tool
-/// allowlist (empty means every registered tool is allowed — the model itself decides
-/// whether and which tool to call, via the tool-calling loop in `commands::generate`).
 pub struct FlowTurn {
     pub system_prompt: String,
     pub tool_allowlist: Vec<String>,
 }
 
 impl FlowState {
-    /// Loads the `default` flow for `conversation_id` first if it has no runner yet, then
-    /// returns the current state's turn info.
     pub fn ensure_and_take_turn(&self, conversation_id: &str) -> Result<FlowTurn, String> {
-        let mut runners = self.runners.lock().unwrap();
+        let mut runners = crate::sync::lock(&self.runners);
         if !runners.contains_key(conversation_id) {
-            let runner = load_flow_runner(DEFAULT_FLOW_NAME)?;
+            let runner = load_flow_runner(default_flow_name())?;
             runners.insert(conversation_id.to_string(), runner);
         }
         let runner = runners.get(conversation_id).expect("just inserted above");
@@ -41,7 +34,7 @@ impl FlowState {
     }
 
     pub fn advance(&self, conversation_id: &str, trigger: &str) -> Option<FlowStateInfo> {
-        let mut runners = self.runners.lock().unwrap();
+        let mut runners = crate::sync::lock(&self.runners);
         let runner = runners.get_mut(conversation_id)?;
         runner.advance(trigger);
         Some(describe(runner))
@@ -95,11 +88,7 @@ pub fn load_flow(
 ) -> Result<FlowStateInfo, String> {
     let runner = load_flow_runner(&name)?;
     let info = describe(&runner);
-    state
-        .runners
-        .lock()
-        .unwrap()
-        .insert(conversation_id, runner);
+    crate::sync::lock(&state.runners).insert(conversation_id, runner);
     Ok(info)
 }
 
@@ -108,15 +97,12 @@ pub fn flow_status(
     conversation_id: String,
     state: tauri::State<'_, FlowState>,
 ) -> Option<FlowStateInfo> {
-    state
-        .runners
-        .lock()
-        .unwrap()
+    crate::sync::lock(&state.runners)
         .get(&conversation_id)
         .map(describe)
 }
 
 #[tauri::command]
 pub fn unload_flow(conversation_id: String, state: tauri::State<'_, FlowState>) {
-    state.runners.lock().unwrap().remove(&conversation_id);
+    crate::sync::lock(&state.runners).remove(&conversation_id);
 }

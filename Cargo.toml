@@ -46,3 +46,12 @@ tauri-plugin-autostart = "2.5"
 genai = { version = "0.6", default-features = false, features = ["rustls-tls"] }
 futures-util = "0.3"
 rmcp = { version = "2.2", default-features = false, features = ["client", "transport-child-process", "transport-io", "transport-streamable-http-client", "transport-streamable-http-client-reqwest", "reqwest"] }
+png = "0.17"
+base64 = "0.22"
+ort = { version = "2.0.0-rc.12", default-features = false, features = ["load-dynamic"] }
+tokenizers = { version = "0.21", default-features = false, features = ["onig"] }
+rustfft = "6"
+cpal = "0.15"
+hound = "3"
+sha2 = "0.10"
+zip = { version = "2", default-features = false, features = ["deflate"] }

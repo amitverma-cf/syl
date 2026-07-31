@@ -13,13 +13,12 @@ use daemon::scheduler::{CronScheduler, Uuid};
 use memory::ConversationStore;
 use tauri::{AppHandle, Manager};
 
-use crate::commands::{run_generate, run_generate_cloud};
+use crate::commands::{run_generate, run_generate_cloud, run_generate_with_engine};
 use crate::daemon::DaemonState;
-use crate::flows::{FlowState, DEFAULT_FLOW_NAME};
+use crate::flows::{default_flow_name, FlowState};
+use crate::local_models::LocalModelState;
 use crate::{AppState, ToolState};
 
-/// Holds the live cron scheduler plus a map from a persisted job's stable id to the scheduler's
-/// own runtime id, so `remove_scheduled_job` knows which live job to unregister.
 pub struct SchedulerState {
     pub scheduler: Arc<CronScheduler>,
     running: Mutex<HashMap<String, Uuid>>,
@@ -34,20 +33,13 @@ impl SchedulerState {
     }
 }
 
-/// Loads every persisted scheduled job and registers it with `scheduler`, tracking each one's
-/// live runtime id in `scheduler_state`. Called once at startup — independent of whether the
-/// main window is open, same as the registry-poll job.
 pub async fn register_persisted_jobs(app: &AppHandle, scheduler_state: &SchedulerState) {
     let jobs_file = workspace_paths::scheduled_jobs_file();
     for job in load_scheduled_jobs(&jobs_file) {
         let job_name = job.name.clone();
         match register_job(app, &scheduler_state.scheduler, job.clone()).await {
             Ok(job_uuid) => {
-                scheduler_state
-                    .running
-                    .lock()
-                    .unwrap()
-                    .insert(job.id.clone(), job_uuid);
+                crate::sync::lock(&scheduler_state.running).insert(job.id.clone(), job_uuid);
             }
             Err(err) => {
                 tracing::error!(?err, job = %job_name, "failed to register scheduled job");
@@ -75,22 +67,27 @@ async fn register_job(
         .await
 }
 
-/// Runs one unattended chat turn for `job`: the exact same tool-calling loop and flow FSM a
-/// live chat message goes through, just without a UI `Channel` to stream pieces to.
 async fn fire_job(app: AppHandle, job: ScheduledJob) {
     let app_state = app.state::<AppState>();
     let tool_state = app.state::<ToolState>();
     let flow_state = app.state::<FlowState>();
     let daemon_state = app.state::<DaemonState>();
+    let local_model_state = app.state::<LocalModelState>();
 
-    // Idempotent: the conversation is created once, on the job's first-ever firing.
     let _ = app_state.conversation_store.create_conversation(
         &job.conversation_id,
         &job.name,
-        DEFAULT_FLOW_NAME,
+        default_flow_name(),
     );
 
-    let result = fire_turn(&app_state, &tool_state, &flow_state, &job).await;
+    let result = fire_turn(
+        &app_state,
+        &tool_state,
+        &flow_state,
+        &local_model_state,
+        &job,
+    )
+    .await;
 
     if result.is_ok() {
         if let Some(info) = flow_state.advance(&job.conversation_id, "message") {
@@ -116,6 +113,7 @@ async fn fire_turn(
     app_state: &tauri::State<'_, AppState>,
     tool_state: &tauri::State<'_, ToolState>,
     flow_state: &tauri::State<'_, FlowState>,
+    local_model_state: &tauri::State<'_, LocalModelState>,
     job: &ScheduledJob,
 ) -> Result<(), String> {
     let store = app_state.conversation_store.clone();
@@ -124,41 +122,56 @@ async fn fire_turn(
         .executor
         .tool_specs_filtered(&flow_turn.tool_allowlist);
 
-    match &job.model {
-        Some(model_id) => {
-            run_generate_cloud(
+    if let Some(model_id) = &job.model {
+        return run_generate_cloud(
+            &store,
+            &job.conversation_id,
+            &job.prompt,
+            &flow_turn.system_prompt,
+            model_id,
+            &tools,
+            &tool_state.executor,
+            |_piece| {},
+        )
+        .await;
+    }
+
+    let conversation_id = job.conversation_id.clone();
+    let prompt = job.prompt.clone();
+    let system_prompt = flow_turn.system_prompt.clone();
+    let executor = tool_state.executor.clone();
+
+    if let Some(engine) = local_model_state.any_loaded() {
+        return tauri::async_runtime::spawn_blocking(move || {
+            let mut engine = crate::sync::lock(&engine);
+            run_generate_with_engine(
+                &mut engine,
                 &store,
-                &job.conversation_id,
-                &job.prompt,
-                &flow_turn.system_prompt,
-                model_id,
+                &conversation_id,
+                &prompt,
+                &system_prompt,
                 &tools,
-                &tool_state.executor,
+                &executor,
                 |_piece| {},
             )
-            .await
-        }
-        None => {
-            let store = store.clone();
-            let conversation_id = job.conversation_id.clone();
-            let prompt = job.prompt.clone();
-            let system_prompt = flow_turn.system_prompt.clone();
-            let executor = tool_state.executor.clone();
-            tauri::async_runtime::spawn_blocking(move || {
-                run_generate(
-                    &store,
-                    &conversation_id,
-                    &prompt,
-                    &system_prompt,
-                    &tools,
-                    &executor,
-                    |_piece| {},
-                )
-            })
-            .await
-            .map_err(|e| e.to_string())?
-        }
+        })
+        .await
+        .map_err(|e| e.to_string())?;
     }
+
+    tauri::async_runtime::spawn_blocking(move || {
+        run_generate(
+            &store,
+            &conversation_id,
+            &prompt,
+            &system_prompt,
+            &tools,
+            &executor,
+            |_piece| {},
+        )
+    })
+    .await
+    .map_err(|e| e.to_string())?
 }
 
 #[tauri::command]
@@ -179,7 +192,7 @@ pub async fn add_scheduled_job(
     let conversation_id = Uuid::new_v4().to_string();
     state
         .conversation_store
-        .create_conversation(&conversation_id, &name, DEFAULT_FLOW_NAME)
+        .create_conversation(&conversation_id, &name, default_flow_name())
         .map_err(|e| e.to_string())?;
 
     let job = ScheduledJob {
@@ -210,7 +223,7 @@ pub async fn remove_scheduled_job(
     id: String,
     scheduler_state: tauri::State<'_, SchedulerState>,
 ) -> Result<(), String> {
-    let job_uuid = scheduler_state.running.lock().unwrap().remove(&id);
+    let job_uuid = crate::sync::lock(&scheduler_state.running).remove(&id);
     if let Some(job_uuid) = job_uuid {
         scheduler_state
             .scheduler

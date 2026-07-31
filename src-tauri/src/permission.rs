@@ -61,6 +61,11 @@ impl PermissionPrompter for TauriPermissionPrompter {
             return PromptResponse::Deny;
         }
 
+        tracing::info!(
+            request_id,
+            tool_name,
+            "waiting for user to answer permission prompt"
+        );
         receiver.await.unwrap_or(PromptResponse::Deny)
     }
 }

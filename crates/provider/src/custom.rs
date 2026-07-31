@@ -60,10 +60,6 @@ fn env_var_name_for(provider_name: &str) -> String {
     format!("CUSTOM_{sanitized}_API_KEY")
 }
 
-/// Fetches the model list from an OpenAI-compatible `GET {base_url}/models` endpoint (the
-/// `{"data": [{"id": "..."}, ...]}` shape every OpenAI-compatible server implements), then
-/// persists the provider (base URL + discovered models) to `providers_path` and, if an API key
-/// was given, the key itself to `env_path` — the same `.syl/.env` file cloud provider keys use.
 pub fn add_custom_provider(
     providers_path: &Path,
     env_path: &Path,
