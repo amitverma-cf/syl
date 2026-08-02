@@ -1,5 +1,7 @@
 import { useState } from "react";
 import { invoke } from "@tauri-apps/api/core";
+import { toast } from "sonner";
+import { IconDownload, IconTrash } from "@tabler/icons-react";
 import {
   formatBytes,
   type CatalogModel,
@@ -50,8 +52,10 @@ function AiProvidersTab({
       await invoke("set_provider_api_key", { envVar, key });
       setKeyDrafts((prev) => ({ ...prev, [envVar]: "" }));
       refreshProviders();
+      toast.success(`${envVar} saved`);
     } catch (err) {
       setError(String(err));
+      toast.error(String(err));
     } finally {
       setSavingProvider(null);
     }
@@ -72,8 +76,10 @@ function AiProvidersTab({
       setNewProviderUrl("");
       setNewProviderKey("");
       refreshCustomProviders();
+      toast.success(`Provider ${newProviderName.trim()} added`);
     } catch (err) {
       setError(String(err));
+      toast.error(String(err));
     } finally {
       setAddingProvider(false);
     }
@@ -84,8 +90,10 @@ function AiProvidersTab({
     try {
       await invoke("set_local_model_kind", { name, kind });
       refreshLocalModels();
+      toast.success(`${name} marked as ${kind}`);
     } catch (err) {
       setError(String(err));
+      toast.error(String(err));
     }
   }
 
@@ -97,8 +105,10 @@ function AiProvidersTab({
       await invoke("delete_local_model", { name });
       refreshLocalModels();
       refreshCatalogModels();
+      toast.success(`${name} deleted`);
     } catch (err) {
       setError(String(err));
+      toast.error(String(err));
     } finally {
       setDeletingModel(null);
     }
@@ -111,201 +121,161 @@ function AiProvidersTab({
       await invoke("download_model", { name });
       refreshCatalogModels();
       refreshLocalModels();
+      toast.success(`${name} downloaded and verified`);
     } catch (err) {
       setError(String(err));
+      toast.error(String(err));
     } finally {
       setDownloadingModel(null);
     }
   }
 
-  return (
-    <div className="flex flex-col gap-6">
-      <div className="flex flex-col gap-2">
-        <h2 className="text-sm font-medium">Cloud provider API keys</h2>
-        {providers.map((p) => (
-          <div key={p.envVar} className="flex items-center gap-2">
-            <span className="w-28 shrink-0 text-sm">{p.name}</span>
-            <input
-              type="password"
-              value={keyDrafts[p.envVar] ?? ""}
-              onChange={(e) =>
-                setKeyDrafts((prev) => ({ ...prev, [p.envVar]: e.currentTarget.value }))
-              }
-              placeholder={p.configured ? "Key saved — enter to replace" : "API key"}
-              className="flex-1 rounded border border-neutral-700 bg-neutral-900 px-2 py-1 text-sm"
-            />
-            <button
-              onClick={() => handleSaveKey(p.envVar)}
-              disabled={savingProvider === p.envVar || !keyDrafts[p.envVar]}
-              className="rounded bg-neutral-100 px-2 py-1 text-xs font-medium text-neutral-950 disabled:opacity-50"
-            >
-              Save
-            </button>
-            {p.configured && <span className="text-xs text-green-400">Configured</span>}
-          </div>
-        ))}
-      </div>
+  const kindOptions: Array<"chat" | "embedding" | "image" | "asr" | "tts"> = [
+    "chat",
+    "embedding",
+    "image",
+    "asr",
+    "tts",
+  ];
 
-      <div className="flex flex-col gap-2">
-        <h2 className="text-sm font-medium">Custom OpenAI-compatible providers</h2>
-        <form onSubmit={handleAddCustomProvider} className="flex flex-wrap gap-2">
-          <input
-            value={newProviderName}
-            onChange={(e) => setNewProviderName(e.currentTarget.value)}
-            placeholder="Name (e.g. nvidia)"
-            className="w-40 rounded border border-neutral-700 bg-neutral-900 px-2 py-1 text-sm"
-          />
-          <input
-            value={newProviderUrl}
-            onChange={(e) => setNewProviderUrl(e.currentTarget.value)}
-            placeholder="Base URL (e.g. https://integrate.api.nvidia.com/v1)"
-            className="flex-1 rounded border border-neutral-700 bg-neutral-900 px-2 py-1 text-sm"
-          />
+  return (
+    <div>
+      <div className="settings-section-title">Cloud provider API keys</div>
+      {providers.map((p) => (
+        <div key={p.envVar} className="form-row">
+          <span style={{ width: 90, flexShrink: 0, fontSize: 12, color: "rgba(255,255,255,.7)" }}>
+            {p.name}
+          </span>
           <input
             type="password"
-            value={newProviderKey}
-            onChange={(e) => setNewProviderKey(e.currentTarget.value)}
-            placeholder="API key (optional)"
-            className="w-40 rounded border border-neutral-700 bg-neutral-900 px-2 py-1 text-sm"
+            value={keyDrafts[p.envVar] ?? ""}
+            onChange={(e) => setKeyDrafts((prev) => ({ ...prev, [p.envVar]: e.currentTarget.value }))}
+            placeholder={p.configured ? "Key saved — enter to replace" : "API key"}
+            className="form-input"
           />
           <button
-            type="submit"
-            disabled={addingProvider}
-            className="rounded bg-neutral-100 px-2 py-1 text-xs font-medium text-neutral-950 disabled:opacity-50"
+            onClick={() => handleSaveKey(p.envVar)}
+            disabled={savingProvider === p.envVar || !keyDrafts[p.envVar]}
+            className="form-btn"
           >
-            {addingProvider ? "Fetching models..." : "Add"}
+            Save
           </button>
-        </form>
-        {customProviders.length === 0 && (
-          <p className="text-sm text-neutral-500">No custom providers yet.</p>
-        )}
-        {customProviders.map((p) => (
-          <div
-            key={p.name}
-            className="flex items-center justify-between rounded border border-neutral-800 px-2 py-1 text-xs text-neutral-400"
-          >
-            <span>
-              <span className="font-mono text-neutral-200">{p.name}</span> — {p.baseUrl} ·{" "}
-              {p.models.length} models
+          {p.configured && <span className="pill">configured</span>}
+        </div>
+      ))}
+
+      <div className="settings-section-title">Custom OpenAI-compatible providers</div>
+      {customProviders.length === 0 && (
+        <p style={{ fontSize: 12, color: "var(--text-3)", margin: "0 0 8px" }}>
+          No custom providers yet.
+        </p>
+      )}
+      {customProviders.map((p) => (
+        <div key={p.name} className="model-row">
+          <div>
+            <div className="name">{p.name}</div>
+            <div className="kind">
+              {p.baseUrl} · {p.models.length} models
+            </div>
+          </div>
+        </div>
+      ))}
+      <form onSubmit={handleAddCustomProvider} className="form-row">
+        <input
+          value={newProviderName}
+          onChange={(e) => setNewProviderName(e.currentTarget.value)}
+          placeholder="Name"
+          className="form-input"
+          style={{ flex: "0 0 110px" }}
+        />
+        <input
+          value={newProviderUrl}
+          onChange={(e) => setNewProviderUrl(e.currentTarget.value)}
+          placeholder="Base URL"
+          className="form-input"
+        />
+        <input
+          type="password"
+          value={newProviderKey}
+          onChange={(e) => setNewProviderKey(e.currentTarget.value)}
+          placeholder="API key (optional)"
+          className="form-input"
+          style={{ flex: "0 0 140px" }}
+        />
+        <button type="submit" disabled={addingProvider} className="form-btn">
+          {addingProvider ? "Fetching…" : "Add"}
+        </button>
+      </form>
+
+      <div className="settings-section-title">Local models</div>
+      <p style={{ fontSize: 11.5, color: "var(--text-3)", margin: "0 0 8px", lineHeight: 1.5 }}>
+        GGUF files found in <code>.syl/models</code>. Load/unload from the composer's model picker
+        — this list is for categorizing and removing files.
+      </p>
+      {localModels.length === 0 && (
+        <p style={{ fontSize: 12, color: "var(--text-3)" }}>No .gguf files found.</p>
+      )}
+      {localModels.map((m) => (
+        <div key={m.name} className="model-row">
+          <div>
+            <div className="name">{m.name}</div>
+            <div className="kind">
+              {formatBytes(m.sizeBytes)}
+              {m.kind && ` · ${m.kind}`}
+              {m.loaded && " · loaded"}
+            </div>
+          </div>
+          <div style={{ display: "flex", alignItems: "center", gap: 6, flexShrink: 0 }}>
+            {m.kind === null && (
+              <div className="kind-btn-row">
+                {kindOptions.map((k) => (
+                  <span key={k} className="kind-btn" onClick={() => handleSetKind(m.name, k)}>
+                    {k}
+                  </span>
+                ))}
+              </div>
+            )}
+            <span
+              className="header-icon-btn"
+              title="Delete"
+              onClick={() => deletingModel !== m.name && handleDeleteModel(m.name)}
+              style={{ opacity: deletingModel === m.name ? 0.5 : 1, color: "#ff8783" }}
+            >
+              <IconTrash size={14} aria-hidden />
             </span>
           </div>
-        ))}
-      </div>
-
-      <div className="flex flex-col gap-2">
-        <div className="flex items-center justify-between">
-          <h2 className="text-sm font-medium">Local models</h2>
-          <button onClick={refreshLocalModels} className="text-xs text-neutral-400 underline">
-            Refresh
-          </button>
         </div>
-        <p className="text-xs text-neutral-500">
-          GGUF files found in <span className="font-mono">.syl/models</span>, categorized by
-          <span className="font-mono"> .syl/registry/models.json</span>. Load/unload a model from
-          the model dropdown in chat, not here — this tab is for categorizing and removing files.
-        </p>
-        {localModels.length === 0 && (
-          <p className="text-sm text-neutral-500">No .gguf files found.</p>
-        )}
-        {localModels.map((m) => (
-          <div
-            key={m.name}
-            className="flex items-center justify-between rounded border border-neutral-800 px-3 py-2 text-sm"
-          >
-            <div>
-              <span className="font-mono">{m.name}</span>
-              <span className="ml-2 text-xs text-neutral-500">
-                {formatBytes(m.sizeBytes)}
-                {m.kind && ` · ${m.kind}`}
-                {m.loaded && " · loaded"}
-              </span>
-            </div>
-            <div className="flex items-center gap-2">
-              {m.kind === null && (
-                <>
-                  <span className="text-xs text-amber-400">Uncategorized</span>
-                  <button
-                    onClick={() => handleSetKind(m.name, "chat")}
-                    className="rounded border border-neutral-700 px-2 py-1 text-xs text-neutral-400"
-                  >
-                    Mark as chat
-                  </button>
-                  <button
-                    onClick={() => handleSetKind(m.name, "embedding")}
-                    className="rounded border border-neutral-700 px-2 py-1 text-xs text-neutral-400"
-                  >
-                    Mark as embedding
-                  </button>
-                  <button
-                    onClick={() => handleSetKind(m.name, "image")}
-                    className="rounded border border-neutral-700 px-2 py-1 text-xs text-neutral-400"
-                  >
-                    Mark as image
-                  </button>
-                  <button
-                    onClick={() => handleSetKind(m.name, "asr")}
-                    className="rounded border border-neutral-700 px-2 py-1 text-xs text-neutral-400"
-                  >
-                    Mark as ASR
-                  </button>
-                  <button
-                    onClick={() => handleSetKind(m.name, "tts")}
-                    className="rounded border border-neutral-700 px-2 py-1 text-xs text-neutral-400"
-                  >
-                    Mark as TTS
-                  </button>
-                </>
-              )}
-              <button
-                onClick={() => handleDeleteModel(m.name)}
-                disabled={deletingModel === m.name}
-                className="rounded border border-red-900 px-2 py-1 text-xs text-red-400 disabled:opacity-50"
-              >
-                {deletingModel === m.name ? "Deleting..." : "Delete"}
-              </button>
+      ))}
+
+      <div className="settings-section-title">Browse catalog</div>
+      {catalogModels.length === 0 && (
+        <p style={{ fontSize: 12, color: "var(--text-3)" }}>No models in the registry yet.</p>
+      )}
+      {catalogModels.map((m) => (
+        <div key={m.name} className="catalog-row">
+          <div>
+            <div className="name">{m.name}</div>
+            <div className="kind">
+              {m.kind} · {m.quantization} · {formatBytes(m.sizeBytes)}
+              {!m.fitsInAvailableMemory && " · may not fit in available RAM"}
             </div>
           </div>
-        ))}
-      </div>
-
-      <div className="flex flex-col gap-2">
-        <div className="flex items-center justify-between">
-          <h2 className="text-sm font-medium">Download more models</h2>
-          <button onClick={refreshCatalogModels} className="text-xs text-neutral-400 underline">
-            Refresh
-          </button>
-        </div>
-        {catalogModels.length === 0 && (
-          <p className="text-sm text-neutral-500">No models in the registry yet.</p>
-        )}
-        {catalogModels.map((m) => (
-          <div
-            key={m.name}
-            className="flex items-center justify-between rounded border border-neutral-800 px-3 py-2 text-sm"
-          >
-            <div>
-              <span className="font-mono">{m.name}</span>
-              <span className="ml-2 text-xs text-neutral-500">
-                {m.kind} · {m.quantization} · {formatBytes(m.sizeBytes)}
-                {!m.fitsInAvailableMemory && " · may not fit in available RAM"}
-              </span>
+          {m.alreadyDownloaded ? (
+            <span className="pill">downloaded</span>
+          ) : (
+            <div
+              className="catalog-download-btn"
+              onClick={() => downloadingModel !== m.name && handleDownloadModel(m.name)}
+              style={{ opacity: downloadingModel === m.name ? 0.6 : 1 }}
+            >
+              <IconDownload size={13} aria-hidden />
+              {downloadingModel === m.name ? "Downloading…" : "Download"}
             </div>
-            {m.alreadyDownloaded ? (
-              <span className="text-xs text-green-400">Downloaded</span>
-            ) : (
-              <button
-                onClick={() => handleDownloadModel(m.name)}
-                disabled={downloadingModel === m.name}
-                className="rounded bg-neutral-100 px-2 py-1 text-xs font-medium text-neutral-950 disabled:opacity-50"
-              >
-                {downloadingModel === m.name ? "Downloading..." : "Download"}
-              </button>
-            )}
-          </div>
-        ))}
-      </div>
+          )}
+        </div>
+      ))}
 
-      {error && <p className="text-sm text-red-400">{error}</p>}
+      {error && <p className="settings-error">{error}</p>}
     </div>
   );
 }
