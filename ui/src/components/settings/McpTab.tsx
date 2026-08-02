@@ -1,5 +1,7 @@
 import { useState } from "react";
 import { invoke } from "@tauri-apps/api/core";
+import { toast } from "sonner";
+import { IconTrash } from "@tabler/icons-react";
 import type { McpServerConfig, McpToolDescriptor, McpTransportConfig } from "../../types";
 
 interface McpTabProps {
@@ -45,8 +47,10 @@ function McpTab({ mcpServers, refresh }: McpTabProps) {
       setUrl("");
       setBearerToken("");
       refresh();
+      toast.success(`${name.trim()} connected`);
     } catch (err) {
       setError(String(err));
+      toast.error(String(err));
     } finally {
       setAdding(false);
     }
@@ -62,28 +66,61 @@ function McpTab({ mcpServers, refresh }: McpTabProps) {
         return next;
       });
       refresh();
+      toast.success(`${serverName} removed`);
     } catch (err) {
       setError(String(err));
+      toast.error(String(err));
     }
   }
 
   return (
-    <div className="flex flex-col gap-2">
-      <h2 className="text-sm font-medium">MCP servers</h2>
-      <form onSubmit={handleAdd} className="flex flex-wrap items-center gap-2">
+    <div>
+      <div className="settings-section-title">Connected servers</div>
+      {mcpServers.length === 0 && (
+        <p style={{ fontSize: 12, color: "var(--text-3)", margin: "0 0 8px" }}>
+          No MCP servers connected yet.
+        </p>
+      )}
+      {mcpServers.map((s) => (
+        <div key={s.name} className="model-row" style={{ flexDirection: "column", alignItems: "stretch" }}>
+          <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between" }}>
+            <div>
+              <div className="name">{s.name}</div>
+              <div className="kind">
+                {s.transport.transport === "stdio"
+                  ? `${s.transport.command} ${s.transport.args.join(" ")}`
+                  : s.transport.url}
+              </div>
+            </div>
+            <span className="header-icon-btn" style={{ color: "#ff8783" }} onClick={() => handleRemove(s.name)}>
+              <IconTrash size={14} aria-hidden />
+            </span>
+          </div>
+          {tools[s.name] && (
+            <div className="kind" style={{ marginTop: 4 }}>
+              Tools: {tools[s.name].map((t) => t.name).join(", ")}
+            </div>
+          )}
+        </div>
+      ))}
+
+      <div className="settings-section-title">Add MCP server</div>
+      <form onSubmit={handleAdd} className="form-row">
         <select
           value={transport}
           onChange={(e) => setTransport(e.currentTarget.value as "stdio" | "http")}
-          className="rounded border border-neutral-700 bg-neutral-900 px-2 py-1 text-sm"
+          className="form-select"
+          style={{ flex: "0 0 120px" }}
         >
-          <option value="stdio">Local (stdio)</option>
-          <option value="http">Remote (HTTP)</option>
+          <option value="stdio">stdio</option>
+          <option value="http">http</option>
         </select>
         <input
           value={name}
           onChange={(e) => setName(e.currentTarget.value)}
           placeholder="Name"
-          className="w-32 rounded border border-neutral-700 bg-neutral-900 px-2 py-1 text-sm"
+          className="form-input"
+          style={{ flex: "0 0 100px" }}
         />
         {transport === "stdio" ? (
           <>
@@ -91,13 +128,14 @@ function McpTab({ mcpServers, refresh }: McpTabProps) {
               value={command}
               onChange={(e) => setCommand(e.currentTarget.value)}
               placeholder="Command (e.g. npx)"
-              className="w-32 rounded border border-neutral-700 bg-neutral-900 px-2 py-1 text-sm"
+              className="form-input"
+              style={{ flex: "0 0 110px" }}
             />
             <input
               value={args}
               onChange={(e) => setArgs(e.currentTarget.value)}
               placeholder="Args (space-separated)"
-              className="flex-1 rounded border border-neutral-700 bg-neutral-900 px-2 py-1 text-sm"
+              className="form-input"
             />
           </>
         ) : (
@@ -105,47 +143,24 @@ function McpTab({ mcpServers, refresh }: McpTabProps) {
             <input
               value={url}
               onChange={(e) => setUrl(e.currentTarget.value)}
-              placeholder="Server URL (Streamable HTTP)"
-              className="flex-1 rounded border border-neutral-700 bg-neutral-900 px-2 py-1 text-sm"
+              placeholder="Server URL"
+              className="form-input"
             />
             <input
               type="password"
               value={bearerToken}
               onChange={(e) => setBearerToken(e.currentTarget.value)}
               placeholder="Bearer token (optional)"
-              className="w-40 rounded border border-neutral-700 bg-neutral-900 px-2 py-1 text-sm"
+              className="form-input"
+              style={{ flex: "0 0 140px" }}
             />
           </>
         )}
-        <button
-          type="submit"
-          disabled={adding}
-          className="rounded bg-neutral-100 px-2 py-1 text-xs font-medium text-neutral-950 disabled:opacity-50"
-        >
-          {adding ? "Connecting..." : "Connect"}
+        <button type="submit" disabled={adding} className="form-btn">
+          {adding ? "Connecting…" : "Add"}
         </button>
       </form>
-      {mcpServers.length === 0 && <p className="text-sm text-neutral-500">No MCP servers connected.</p>}
-      {mcpServers.map((s) => (
-        <div
-          key={s.name}
-          className="flex flex-col gap-1 rounded border border-neutral-800 px-2 py-1 text-xs text-neutral-400"
-        >
-          <div className="flex items-center justify-between">
-            <span>
-              <span className="font-mono text-neutral-200">{s.name}</span> —{" "}
-              {s.transport.transport === "stdio"
-                ? `${s.transport.command} ${s.transport.args.join(" ")}`
-                : s.transport.url}
-            </span>
-            <button onClick={() => handleRemove(s.name)} className="text-neutral-400 underline">
-              Remove
-            </button>
-          </div>
-          {tools[s.name] && <span>Tools: {tools[s.name].map((t) => t.name).join(", ")}</span>}
-        </div>
-      ))}
-      {error && <p className="text-sm text-red-400">{error}</p>}
+      {error && <p className="settings-error">{error}</p>}
     </div>
   );
 }
