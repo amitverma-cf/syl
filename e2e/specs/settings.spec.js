@@ -61,7 +61,7 @@ describe("settings overlay", function () {
   });
 
   it("closes via the header close button", async function () {
-    await driver.findElement(By.css(".settings-content-head .header-icon-btn")).click();
+    await driver.findElement(By.css(".settings-content-head button")).click();
     await driver.sleep(150);
     // SettingsOverlay unmounts entirely (returns null) when closed, rather than
     // just toggling a CSS class.

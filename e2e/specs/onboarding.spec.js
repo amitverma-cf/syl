@@ -39,7 +39,7 @@ describe("first-run onboarding", function () {
   });
 
   it("does not reappear after being dismissed once settings are closed", async function () {
-    const closeBtn = await driver.findElement(By.css(".settings-content-head .header-icon-btn"));
+    const closeBtn = await driver.findElement(By.css(".settings-content-head button"));
     await closeBtn.click();
     await driver.sleep(150);
     assert.ok(!(await isPresent(driver, ".onboarding-overlay")));

@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import { IconTrash } from "@tabler/icons-react";
+import { Button, IconButton, Input, Select, Textarea } from "../ui";
 import type { CloudModel, ScheduledJob } from "../../types";
 
 interface ScheduledJobsTabProps {
@@ -78,52 +79,47 @@ function ScheduledJobsTab({ cloudModels }: ScheduledJobsTabProps) {
               {job.prompt}
             </div>
           </div>
-          <span className="header-icon-btn" style={{ color: "#ff8783" }} onClick={() => handleRemove(job.id)}>
-            <IconTrash size={14} aria-hidden />
-          </span>
+          <IconButton icon={IconTrash} iconSize={14} variant="danger" onClick={() => handleRemove(job.id)} />
         </div>
       ))}
 
       <div className="settings-section-title">New job</div>
       <form onSubmit={handleAdd}>
         <div className="form-row">
-          <input
+          <Input
             value={name}
             onChange={(e) => setName(e.currentTarget.value)}
             placeholder="Name (e.g. Morning summary)"
-            className="form-input"
           />
-          <input
+          <Input
             value={cronExpr}
             onChange={(e) => setCronExpr(e.currentTarget.value)}
             placeholder="Cron expression (6-field)"
-            className="form-input"
             style={{ flex: "0 0 160px", fontFamily: "ui-monospace, monospace" }}
           />
         </div>
         <div className="form-row">
-          <select value={model} onChange={(e) => setModel(e.currentTarget.value)} className="form-select">
+          <Select value={model} onChange={(e) => setModel(e.currentTarget.value)}>
             <option value="">Local (default)</option>
             {cloudModels.map((m) => (
               <option key={m.id} value={m.id}>
                 {m.label} ({m.provider})
               </option>
             ))}
-          </select>
+          </Select>
         </div>
         <div className="form-row" style={{ alignItems: "flex-start" }}>
-          <textarea
+          <Textarea
             value={prompt}
             onChange={(e) => setPrompt(e.currentTarget.value)}
             placeholder="Prompt to send when this job fires"
             rows={2}
-            className="form-input"
             style={{ resize: "vertical" }}
           />
         </div>
-        <div className="form-btn" style={{ display: "inline-block", opacity: adding ? 0.6 : 1 }} onClick={handleAdd}>
+        <Button type="submit" disabled={adding} style={{ display: "inline-block" }}>
           {adding ? "Scheduling…" : "Schedule"}
-        </div>
+        </Button>
       </form>
       {error && <p className="settings-error">{error}</p>}
     </div>

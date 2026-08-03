@@ -14,6 +14,7 @@ import {
   IconArrowUp,
   IconChevronDown,
 } from "@tabler/icons-react";
+import { Button } from "./ui";
 import type {
   CloudModel,
   FlowStateInfo,
@@ -464,14 +465,14 @@ function ChatPanel({
             <div className="spacer" />
 
             {isLocalModel && !selectedLocalModelLoaded && (
-              <div className="form-btn" onClick={loadSelectedLocalModel} style={{ fontSize: 11 }}>
+              <Button onClick={loadSelectedLocalModel} style={{ fontSize: 11 }}>
                 {isLoadingModel ? "Loading…" : "Load model"}
-              </div>
+              </Button>
             )}
             {isLocalModel && selectedLocalModelLoaded && (
-              <div className="form-btn" onClick={unloadSelectedLocalModel} style={{ fontSize: 11 }}>
+              <Button onClick={unloadSelectedLocalModel} style={{ fontSize: 11 }}>
                 Unload
-              </div>
+              </Button>
             )}
 
             <div className="dropdown-wrap">

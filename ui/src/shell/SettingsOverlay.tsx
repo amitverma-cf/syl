@@ -8,6 +8,7 @@ import {
   IconX,
 } from "@tabler/icons-react";
 import { useShellStore } from "../store/shellStore";
+import { Overlay, IconButton, NavItem } from "../components/ui";
 import type {
   CatalogModel,
   CloudModel,
@@ -59,32 +60,25 @@ function SettingsOverlay(props: SettingsOverlayProps) {
   const activePane = PANES.find((p) => p.key === settingsPane) ?? PANES[0];
 
   return (
-    <div
-      className="settings-overlay open"
-      onClick={(e) => {
-        if (e.target === e.currentTarget) closeSettings();
-      }}
-    >
+    <Overlay className="settings-overlay open" onClose={closeSettings}>
       <div className="settings-card">
         <div className="settings-nav">
           {PANES.map((p) => (
-            <div
+            <NavItem
               key={p.key}
-              className={`settings-nav-item${p.key === settingsPane ? " active" : ""}`}
+              icon={p.icon}
+              active={p.key === settingsPane}
+              className="settings-nav-item"
               onClick={() => openSettings(p.key)}
-              style={{ display: "flex", alignItems: "center", gap: 8 }}
             >
-              <p.icon size={14} aria-hidden />
               {p.label}
-            </div>
+            </NavItem>
           ))}
         </div>
         <div className="settings-content">
           <div className="settings-content-head">
             <h2>{activePane.label}</h2>
-            <div className="header-icon-btn" onClick={closeSettings}>
-              <IconX size={16} aria-hidden />
-            </div>
+            <IconButton icon={IconX} onClick={closeSettings} aria-label="Close settings" />
           </div>
           <div className="settings-body">
             {settingsPane === "models" && (
@@ -113,7 +107,7 @@ function SettingsOverlay(props: SettingsOverlayProps) {
           </div>
         </div>
       </div>
-    </div>
+    </Overlay>
   );
 }
 

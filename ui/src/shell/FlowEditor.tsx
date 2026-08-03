@@ -2,6 +2,7 @@ import { useEffect, useMemo, useState } from "react";
 import { useAutoGrowTextarea } from "../hooks/useAutoGrowTextarea";
 import { invoke } from "@tauri-apps/api/core";
 import { toast } from "sonner";
+import { IconButton, Button, Input, Textarea, Select } from "../components/ui";
 import {
   IconPlus,
   IconTrash,
@@ -287,9 +288,8 @@ function FlowEditor({ cloudModels, providers, localModels }: FlowEditorProps) {
           borderBottom: "1px solid var(--border-soft)",
         }}
       >
-        <input
+        <Input
           data-testid="flow-name-input"
-          className="form-input"
           style={{ flex: "0 0 180px" }}
           value={flow.name}
           onChange={(e) => {
@@ -301,20 +301,19 @@ function FlowEditor({ cloudModels, providers, localModels }: FlowEditorProps) {
           <span style={{ fontSize: 10.5, color: "var(--text-3)" }}>unsaved as new</span>
         )}
         <div className="spacer" />
-        <div data-testid="flow-add-state" className="form-btn" onClick={addState} style={{ display: "flex", alignItems: "center", gap: 4 }}>
+        <Button data-testid="flow-add-state" onClick={addState} style={{ display: "flex", alignItems: "center", gap: 4 }}>
           <IconPlus size={13} aria-hidden />
           Add state
-        </div>
+        </Button>
         <div className="dropdown-wrap">
-          <div
+          <Button
             data-testid="flow-load-btn"
-            className="form-btn"
             onClick={() => setLoadMenuOpen((v) => !v)}
             style={{ display: "flex", alignItems: "center", gap: 4 }}
           >
             <IconFolderOpen size={13} aria-hidden />
             Load
-          </div>
+          </Button>
           {loadMenuOpen && (
             <div className="option-menu open" style={{ right: "auto", left: 0 }} onMouseLeave={() => setLoadMenuOpen(false)}>
               {availableFlows.length === 0 && <div className="cmdk-empty">No saved flows yet</div>}
@@ -326,33 +325,28 @@ function FlowEditor({ cloudModels, providers, localModels }: FlowEditorProps) {
             </div>
           )}
         </div>
-        <div data-testid="flow-new-btn" className="form-btn" onClick={handleNew} style={{ display: "flex", alignItems: "center", gap: 4 }}>
+        <Button data-testid="flow-new-btn" onClick={handleNew} style={{ display: "flex", alignItems: "center", gap: 4 }}>
           <IconFileText size={13} aria-hidden />
           New
-        </div>
-        <div data-testid="flow-save-btn" className="form-btn" onClick={handleSave} style={{ display: "flex", alignItems: "center", gap: 4 }}>
+        </Button>
+        <Button data-testid="flow-save-btn" onClick={handleSave} style={{ display: "flex", alignItems: "center", gap: 4 }}>
           <IconDeviceFloppy size={13} aria-hidden />
           Save
-        </div>
+        </Button>
         {savedName && confirmDeleteFlow && (
-          <span
-            className="form-btn"
-            style={{ color: "#ff8783" }}
-            onClick={() => setConfirmDeleteFlow(false)}
-          >
+          <Button variant="danger" onClick={() => setConfirmDeleteFlow(false)}>
             Cancel
-          </span>
+          </Button>
         )}
         {savedName && (
-          <span
+          <IconButton
+            icon={IconTrash}
+            iconSize={14}
+            variant="danger"
             data-testid="flow-delete-btn"
-            className="header-icon-btn"
-            style={{ color: "#ff8783" }}
             title={confirmDeleteFlow ? `Really delete "${savedName}"?` : "Delete flow from disk"}
             onClick={handleDeleteFlow}
-          >
-            <IconTrash size={14} aria-hidden />
-          </span>
+          />
         )}
       </div>
 
@@ -449,29 +443,24 @@ function FlowEditor({ cloudModels, providers, localModels }: FlowEditorProps) {
             <div className="settings-section-title" style={{ marginTop: 0 }}>
               State
             </div>
-            <input
+            <Input
               data-testid="flow-state-name-input"
-              className="form-input"
               style={{ marginBottom: 8, width: "100%" }}
               value={selectedState.name}
               onChange={(e) => renameState(selectedState.name, e.currentTarget.value)}
             />
             <div className="form-row">
-              <div
-                className="form-btn"
+              <Button
                 style={{ flex: 1, textAlign: "center" }}
                 onClick={() => setFlow((f) => ({ ...f, initial_state: selectedState.name }))}
               >
                 {flow.initial_state === selectedState.name ? "Is start state" : "Set as start"}
-              </div>
-              <span className="header-icon-btn" style={{ color: "#ff8783" }} onClick={() => deleteState(selectedState.name)}>
-                <IconTrash size={14} aria-hidden />
-              </span>
+              </Button>
+              <IconButton icon={IconTrash} iconSize={14} variant="danger" onClick={() => deleteState(selectedState.name)} />
             </div>
 
             <div className="settings-section-title">System prompt</div>
-            <textarea
-              className="form-input"
+            <Textarea
               style={{ width: "100%", minHeight: 90, resize: "vertical" }}
               value={selectedState.system_prompt}
               onChange={(e) => {
@@ -481,8 +470,7 @@ function FlowEditor({ cloudModels, providers, localModels }: FlowEditorProps) {
             />
 
             <div className="settings-section-title">Tool allowlist</div>
-            <input
-              className="form-input"
+            <Input
               style={{ width: "100%" }}
               placeholder="comma-separated tool names"
               value={selectedState.tool_allowlist.join(", ")}
@@ -498,8 +486,7 @@ function FlowEditor({ cloudModels, providers, localModels }: FlowEditorProps) {
             <div className="settings-section-title">Transitions</div>
             {selectedState.transitions.map((t, i) => (
               <div className="form-row" key={i}>
-                <input
-                  className="form-input"
+                <Input
                   placeholder="on"
                   value={t.on}
                   onChange={(e) => {
@@ -510,8 +497,7 @@ function FlowEditor({ cloudModels, providers, localModels }: FlowEditorProps) {
                     }));
                   }}
                 />
-                <select
-                  className="form-select"
+                <Select
                   value={t.to_state}
                   onChange={(e) => {
                     const value = e.currentTarget.value;
@@ -526,23 +512,21 @@ function FlowEditor({ cloudModels, providers, localModels }: FlowEditorProps) {
                       {st.name}
                     </option>
                   ))}
-                </select>
-                <span
-                  className="header-icon-btn"
-                  style={{ color: "#ff8783" }}
+                </Select>
+                <IconButton
+                  icon={IconTrash}
+                  iconSize={13}
+                  variant="danger"
                   onClick={() =>
                     updateState(selectedState.name, (s) => ({
                       ...s,
                       transitions: s.transitions.filter((_, idx) => idx !== i),
                     }))
                   }
-                >
-                  <IconTrash size={13} aria-hidden />
-                </span>
+                />
               </div>
             ))}
-            <div
-              className="form-btn"
+            <Button
               style={{ textAlign: "center" }}
               onClick={() =>
                 updateState(selectedState.name, (s) => ({
@@ -552,7 +536,7 @@ function FlowEditor({ cloudModels, providers, localModels }: FlowEditorProps) {
               }
             >
               + Add transition
-            </div>
+            </Button>
           </div>
         )}
       </div>
@@ -565,12 +549,10 @@ function FlowEditor({ cloudModels, providers, localModels }: FlowEditorProps) {
             </pre>
             {aiDraftError && <p className="settings-error">{aiDraftError}</p>}
             <div style={{ display: "flex", gap: 6, marginTop: 8 }}>
-              <div data-testid="flow-ai-insert" className="form-btn" onClick={handleInsertDraft}>
+              <Button data-testid="flow-ai-insert" onClick={handleInsertDraft}>
                 Insert into canvas
-              </div>
-              <div className="form-btn" onClick={() => setAiDraftRaw(null)}>
-                Discard
-              </div>
+              </Button>
+              <Button onClick={() => setAiDraftRaw(null)}>Discard</Button>
             </div>
           </div>
         )}

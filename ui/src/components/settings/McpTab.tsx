@@ -2,6 +2,7 @@ import { useState } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import { toast } from "sonner";
 import { IconTrash } from "@tabler/icons-react";
+import { Button, IconButton, Input, Select } from "../ui";
 import type { McpServerConfig, McpToolDescriptor, McpTransportConfig } from "../../types";
 
 interface McpTabProps {
@@ -92,9 +93,7 @@ function McpTab({ mcpServers, refresh }: McpTabProps) {
                   : s.transport.url}
               </div>
             </div>
-            <span className="header-icon-btn" style={{ color: "#ff8783" }} onClick={() => handleRemove(s.name)}>
-              <IconTrash size={14} aria-hidden />
-            </span>
+            <IconButton icon={IconTrash} iconSize={14} variant="danger" onClick={() => handleRemove(s.name)} />
           </div>
           {tools[s.name] && (
             <div className="kind" style={{ marginTop: 4 }}>
@@ -106,59 +105,49 @@ function McpTab({ mcpServers, refresh }: McpTabProps) {
 
       <div className="settings-section-title">Add MCP server</div>
       <form onSubmit={handleAdd} className="form-row">
-        <select
+        <Select
           value={transport}
           onChange={(e) => setTransport(e.currentTarget.value as "stdio" | "http")}
-          className="form-select"
           style={{ flex: "0 0 120px" }}
         >
           <option value="stdio">stdio</option>
           <option value="http">http</option>
-        </select>
-        <input
+        </Select>
+        <Input
           value={name}
           onChange={(e) => setName(e.currentTarget.value)}
           placeholder="Name"
-          className="form-input"
           style={{ flex: "0 0 100px" }}
         />
         {transport === "stdio" ? (
           <>
-            <input
+            <Input
               value={command}
               onChange={(e) => setCommand(e.currentTarget.value)}
               placeholder="Command (e.g. npx)"
-              className="form-input"
               style={{ flex: "0 0 110px" }}
             />
-            <input
+            <Input
               value={args}
               onChange={(e) => setArgs(e.currentTarget.value)}
               placeholder="Args (space-separated)"
-              className="form-input"
             />
           </>
         ) : (
           <>
-            <input
-              value={url}
-              onChange={(e) => setUrl(e.currentTarget.value)}
-              placeholder="Server URL"
-              className="form-input"
-            />
-            <input
+            <Input value={url} onChange={(e) => setUrl(e.currentTarget.value)} placeholder="Server URL" />
+            <Input
               type="password"
               value={bearerToken}
               onChange={(e) => setBearerToken(e.currentTarget.value)}
               placeholder="Bearer token (optional)"
-              className="form-input"
               style={{ flex: "0 0 140px" }}
             />
           </>
         )}
-        <button type="submit" disabled={adding} className="form-btn">
+        <Button type="submit" disabled={adding}>
           {adding ? "Connecting…" : "Add"}
-        </button>
+        </Button>
       </form>
       {error && <p className="settings-error">{error}</p>}
     </div>

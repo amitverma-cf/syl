@@ -20,6 +20,7 @@ import {
   IconPencil,
 } from "@tabler/icons-react";
 import { useShellStore } from "../store/shellStore";
+import { IconButton } from "../components/ui";
 import type { ConversationSummary } from "../types";
 import { joinPath, parentOf, updateNode, type TreeNode } from "./folderTree";
 
@@ -457,21 +458,16 @@ function SidebarShell({ conversations, activeConversationId, onSelect, onDelete 
             ) : (
               <>
                 <div style={{ display: "flex", alignItems: "center", gap: 2, padding: "0 0 6px" }}>
-                  <span className="header-icon-btn" title="Open different folder" onClick={openFolder}>
-                    <IconFolderOpen size={14} aria-hidden />
-                  </span>
-                  <span className="header-icon-btn" title="New file" onClick={startCreateFile}>
-                    <IconFilePlus size={14} aria-hidden />
-                  </span>
-                  <span className="header-icon-btn" title="New folder" onClick={startCreateFolder}>
-                    <IconFolderPlus size={14} aria-hidden />
-                  </span>
-                  <span className="header-icon-btn" title="Refresh" onClick={refreshTree}>
-                    <IconRefresh size={14} aria-hidden />
-                  </span>
-                  <span className="header-icon-btn" title="Collapse all" onClick={collapseAll}>
-                    <IconLayoutSidebarLeftCollapse size={14} aria-hidden />
-                  </span>
+                  <IconButton icon={IconFolderOpen} iconSize={14} title="Open different folder" onClick={openFolder} />
+                  <IconButton icon={IconFilePlus} iconSize={14} title="New file" onClick={startCreateFile} />
+                  <IconButton icon={IconFolderPlus} iconSize={14} title="New folder" onClick={startCreateFolder} />
+                  <IconButton icon={IconRefresh} iconSize={14} title="Refresh" onClick={refreshTree} />
+                  <IconButton
+                    icon={IconLayoutSidebarLeftCollapse}
+                    iconSize={14}
+                    title="Collapse all"
+                    onClick={collapseAll}
+                  />
                 </div>
                 <div className="folder-path" title={rootPath}>
                   {rootPath}

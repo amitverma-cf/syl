@@ -1248,3 +1248,131 @@ body,
   line-height: 1.6;
   padding: 16px 18px;
 }
+
+/* ---------------- base ui components (ui/src/components/ui) ---------------- */
+.ui-icon-btn {
+  width: 26px;
+  height: 26px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 6px;
+  color: var(--text-2);
+  cursor: pointer;
+  background: transparent;
+  border: none;
+  flex-shrink: 0;
+  transition: background 0.12s, color 0.12s;
+}
+.ui-icon-btn:hover:not(:disabled) {
+  background: rgba(255, 255, 255, 0.06);
+  color: var(--text-0);
+}
+.ui-icon-btn:disabled {
+  opacity: 0.5;
+  cursor: default;
+}
+.ui-icon-btn-lg {
+  width: 28px;
+  height: 28px;
+}
+.ui-icon-btn-danger:hover:not(:disabled) {
+  color: #ff8783;
+}
+
+.ui-btn {
+  padding: 7px 13px;
+  border-radius: 7px;
+  font-size: 12px;
+  background: var(--accent-soft);
+  color: #dfe8ff;
+  cursor: pointer;
+  flex-shrink: 0;
+  white-space: nowrap;
+  border: none;
+}
+.ui-btn:hover:not(:disabled) {
+  background: rgba(169, 194, 255, 0.26);
+}
+.ui-btn:disabled {
+  opacity: 0.5;
+  cursor: default;
+}
+.ui-btn-ghost {
+  background: transparent;
+  color: var(--text-1);
+}
+.ui-btn-ghost:hover:not(:disabled) {
+  background: rgba(255, 255, 255, 0.06);
+  color: var(--text-0);
+}
+.ui-btn-danger {
+  background: rgba(255, 135, 131, 0.14);
+  color: #ff8783;
+}
+.ui-btn-danger:hover:not(:disabled) {
+  background: rgba(255, 135, 131, 0.24);
+}
+
+.ui-field-row {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin-bottom: 8px;
+}
+.ui-input,
+.ui-select,
+.ui-textarea {
+  flex: 1;
+  background: rgba(255, 255, 255, 0.05);
+  border-radius: 7px;
+  padding: 7px 9px;
+  font-size: 12.5px;
+  color: var(--text-0);
+  border: none;
+  outline: none;
+  font-family: inherit;
+}
+.ui-input::placeholder,
+.ui-textarea::placeholder {
+  color: var(--text-3);
+}
+.ui-field-error {
+  font-size: 12px;
+  color: #ff8783;
+  margin-top: 8px;
+}
+
+.ui-badge {
+  font-size: 10.5px;
+  padding: 2px 8px;
+  border-radius: 20px;
+  background: rgba(80, 200, 130, 0.18);
+  color: #7ee2a5;
+  flex-shrink: 0;
+  display: inline-block;
+}
+
+.ui-overlay {
+  position: fixed;
+  inset: 0;
+  background: rgba(0, 0, 0, 0.5);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 200;
+}
+
+.ui-nav-item {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  cursor: pointer;
+  color: var(--text-2);
+}
+.ui-nav-item:hover {
+  color: var(--text-0);
+}
+.ui-nav-item.active {
+  color: var(--text-0);
+}
