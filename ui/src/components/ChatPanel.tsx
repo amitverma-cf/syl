@@ -14,6 +14,7 @@ import {
   IconArrowUp,
   IconChevronDown,
 } from "@tabler/icons-react";
+import { Button, DropdownMenu, type DropdownMenuGroup } from "./ui";
 import type {
   CloudModel,
   FlowStateInfo,
@@ -464,65 +465,51 @@ function ChatPanel({
             <div className="spacer" />
 
             {isLocalModel && !selectedLocalModelLoaded && (
-              <div className="form-btn" onClick={loadSelectedLocalModel} style={{ fontSize: 11 }}>
+              <Button onClick={loadSelectedLocalModel} style={{ fontSize: 11 }}>
                 {isLoadingModel ? "Loading…" : "Load model"}
-              </div>
+              </Button>
             )}
             {isLocalModel && selectedLocalModelLoaded && (
-              <div className="form-btn" onClick={unloadSelectedLocalModel} style={{ fontSize: 11 }}>
+              <Button onClick={unloadSelectedLocalModel} style={{ fontSize: 11 }}>
                 Unload
-              </div>
+              </Button>
             )}
 
-            <div className="dropdown-wrap">
-              <div className="dropdown" onClick={() => setModelMenuOpen((v) => !v)}>
-                <span>{selectedModelLabel}</span>
-                <IconChevronDown size={13} aria-hidden />
-              </div>
-              {modelMenuOpen && (
-                <div className="option-menu open" onMouseLeave={() => setModelMenuOpen(false)}>
-                  {chatLocalModels.length > 0 && (
-                    <>
-                      <div className="cmdk-group-label" style={{ padding: "4px 8px" }}>
-                        LOCAL
-                      </div>
-                      {chatLocalModels.map((m) => (
-                        <div
-                          key={m.name}
-                          className={`option-item${selectedModel === `${LOCAL_MODEL_PREFIX}${m.name}` ? " sel" : ""}`}
-                          onClick={() => {
-                            setSelectedModel(`${LOCAL_MODEL_PREFIX}${m.name}`);
-                            setModelMenuOpen(false);
-                          }}
-                        >
-                          {m.name}
-                          <span className="option-sub">{m.loaded ? "loaded" : ""}</span>
-                        </div>
-                      ))}
-                    </>
-                  )}
-                  {Array.from(cloudGroups.entries()).map(([provider, models]) => (
-                    <div key={provider}>
-                      <div className="cmdk-group-label" style={{ padding: "4px 8px" }}>
-                        {provider.toUpperCase()}
-                      </div>
-                      {models.map((m) => (
-                        <div
-                          key={m.id}
-                          className={`option-item${selectedModel === m.id ? " sel" : ""}`}
-                          onClick={() => {
-                            setSelectedModel(m.id);
-                            setModelMenuOpen(false);
-                          }}
-                        >
-                          {m.label}
-                        </div>
-                      ))}
-                    </div>
-                  ))}
+            <DropdownMenu
+              open={modelMenuOpen}
+              onOpenChange={setModelMenuOpen}
+              trigger={
+                <div className="dropdown" onClick={() => setModelMenuOpen((v) => !v)}>
+                  <span>{selectedModelLabel}</span>
+                  <IconChevronDown size={13} aria-hidden />
                 </div>
-              )}
-            </div>
+              }
+              groups={[
+                ...(chatLocalModels.length > 0
+                  ? [
+                      {
+                        label: "LOCAL",
+                        items: chatLocalModels.map((m) => ({
+                          key: m.name,
+                          label: m.name,
+                          sublabel: m.loaded ? "loaded" : undefined,
+                          selected: selectedModel === `${LOCAL_MODEL_PREFIX}${m.name}`,
+                          onSelect: () => setSelectedModel(`${LOCAL_MODEL_PREFIX}${m.name}`),
+                        })),
+                      },
+                    ]
+                  : []),
+                ...Array.from(cloudGroups.entries()).map(([provider, models]): DropdownMenuGroup => ({
+                  label: provider.toUpperCase(),
+                  items: models.map((m) => ({
+                    key: m.id,
+                    label: m.label,
+                    selected: selectedModel === m.id,
+                    onSelect: () => setSelectedModel(m.id),
+                  })),
+                })),
+              ]}
+            />
 
             <div
               className={`send${!prompt.trim() || isGenerating || isLoadingModel || !selectedModel ? " disabled" : ""}`}

@@ -2,6 +2,7 @@ import { useEffect, useMemo, useState } from "react";
 import { useAutoGrowTextarea } from "../hooks/useAutoGrowTextarea";
 import { invoke } from "@tauri-apps/api/core";
 import { toast } from "sonner";
+import { IconButton, Button, Input, Textarea, Select, DropdownMenu, type DropdownMenuGroup } from "../components/ui";
 import {
   IconPlus,
   IconTrash,
@@ -287,9 +288,8 @@ function FlowEditor({ cloudModels, providers, localModels }: FlowEditorProps) {
           borderBottom: "1px solid var(--border-soft)",
         }}
       >
-        <input
+        <Input
           data-testid="flow-name-input"
-          className="form-input"
           style={{ flex: "0 0 180px" }}
           value={flow.name}
           onChange={(e) => {
@@ -301,58 +301,58 @@ function FlowEditor({ cloudModels, providers, localModels }: FlowEditorProps) {
           <span style={{ fontSize: 10.5, color: "var(--text-3)" }}>unsaved as new</span>
         )}
         <div className="spacer" />
-        <div data-testid="flow-add-state" className="form-btn" onClick={addState} style={{ display: "flex", alignItems: "center", gap: 4 }}>
+        <Button data-testid="flow-add-state" onClick={addState} style={{ display: "flex", alignItems: "center", gap: 4 }}>
           <IconPlus size={13} aria-hidden />
           Add state
-        </div>
-        <div className="dropdown-wrap">
-          <div
-            data-testid="flow-load-btn"
-            className="form-btn"
-            onClick={() => setLoadMenuOpen((v) => !v)}
-            style={{ display: "flex", alignItems: "center", gap: 4 }}
-          >
-            <IconFolderOpen size={13} aria-hidden />
-            Load
-          </div>
-          {loadMenuOpen && (
-            <div className="option-menu open" style={{ right: "auto", left: 0 }} onMouseLeave={() => setLoadMenuOpen(false)}>
-              {availableFlows.length === 0 && <div className="cmdk-empty">No saved flows yet</div>}
-              {availableFlows.map((name) => (
-                <div key={name} className="option-item" data-flow-name={name} onClick={() => handleLoad(name)}>
-                  {name}
-                </div>
-              ))}
-            </div>
-          )}
-        </div>
-        <div data-testid="flow-new-btn" className="form-btn" onClick={handleNew} style={{ display: "flex", alignItems: "center", gap: 4 }}>
+        </Button>
+        <DropdownMenu
+          open={loadMenuOpen}
+          onOpenChange={setLoadMenuOpen}
+          menuStyle={{ right: "auto", left: 0 }}
+          emptyLabel="No saved flows yet"
+          trigger={
+            <Button
+              data-testid="flow-load-btn"
+              onClick={() => setLoadMenuOpen((v) => !v)}
+              style={{ display: "flex", alignItems: "center", gap: 4 }}
+            >
+              <IconFolderOpen size={13} aria-hidden />
+              Load
+            </Button>
+          }
+          groups={[
+            {
+              items: availableFlows.map((name) => ({
+                key: name,
+                label: name,
+                onSelect: () => handleLoad(name),
+                attrs: { "data-flow-name": name },
+              })),
+            },
+          ]}
+        />
+        <Button data-testid="flow-new-btn" onClick={handleNew} style={{ display: "flex", alignItems: "center", gap: 4 }}>
           <IconFileText size={13} aria-hidden />
           New
-        </div>
-        <div data-testid="flow-save-btn" className="form-btn" onClick={handleSave} style={{ display: "flex", alignItems: "center", gap: 4 }}>
+        </Button>
+        <Button data-testid="flow-save-btn" onClick={handleSave} style={{ display: "flex", alignItems: "center", gap: 4 }}>
           <IconDeviceFloppy size={13} aria-hidden />
           Save
-        </div>
+        </Button>
         {savedName && confirmDeleteFlow && (
-          <span
-            className="form-btn"
-            style={{ color: "#ff8783" }}
-            onClick={() => setConfirmDeleteFlow(false)}
-          >
+          <Button variant="danger" onClick={() => setConfirmDeleteFlow(false)}>
             Cancel
-          </span>
+          </Button>
         )}
         {savedName && (
-          <span
+          <IconButton
+            icon={IconTrash}
+            iconSize={14}
+            variant="danger"
             data-testid="flow-delete-btn"
-            className="header-icon-btn"
-            style={{ color: "#ff8783" }}
             title={confirmDeleteFlow ? `Really delete "${savedName}"?` : "Delete flow from disk"}
             onClick={handleDeleteFlow}
-          >
-            <IconTrash size={14} aria-hidden />
-          </span>
+          />
         )}
       </div>
 
@@ -449,29 +449,24 @@ function FlowEditor({ cloudModels, providers, localModels }: FlowEditorProps) {
             <div className="settings-section-title" style={{ marginTop: 0 }}>
               State
             </div>
-            <input
+            <Input
               data-testid="flow-state-name-input"
-              className="form-input"
               style={{ marginBottom: 8, width: "100%" }}
               value={selectedState.name}
               onChange={(e) => renameState(selectedState.name, e.currentTarget.value)}
             />
             <div className="form-row">
-              <div
-                className="form-btn"
+              <Button
                 style={{ flex: 1, textAlign: "center" }}
                 onClick={() => setFlow((f) => ({ ...f, initial_state: selectedState.name }))}
               >
                 {flow.initial_state === selectedState.name ? "Is start state" : "Set as start"}
-              </div>
-              <span className="header-icon-btn" style={{ color: "#ff8783" }} onClick={() => deleteState(selectedState.name)}>
-                <IconTrash size={14} aria-hidden />
-              </span>
+              </Button>
+              <IconButton icon={IconTrash} iconSize={14} variant="danger" onClick={() => deleteState(selectedState.name)} />
             </div>
 
             <div className="settings-section-title">System prompt</div>
-            <textarea
-              className="form-input"
+            <Textarea
               style={{ width: "100%", minHeight: 90, resize: "vertical" }}
               value={selectedState.system_prompt}
               onChange={(e) => {
@@ -481,8 +476,7 @@ function FlowEditor({ cloudModels, providers, localModels }: FlowEditorProps) {
             />
 
             <div className="settings-section-title">Tool allowlist</div>
-            <input
-              className="form-input"
+            <Input
               style={{ width: "100%" }}
               placeholder="comma-separated tool names"
               value={selectedState.tool_allowlist.join(", ")}
@@ -498,8 +492,7 @@ function FlowEditor({ cloudModels, providers, localModels }: FlowEditorProps) {
             <div className="settings-section-title">Transitions</div>
             {selectedState.transitions.map((t, i) => (
               <div className="form-row" key={i}>
-                <input
-                  className="form-input"
+                <Input
                   placeholder="on"
                   value={t.on}
                   onChange={(e) => {
@@ -510,8 +503,7 @@ function FlowEditor({ cloudModels, providers, localModels }: FlowEditorProps) {
                     }));
                   }}
                 />
-                <select
-                  className="form-select"
+                <Select
                   value={t.to_state}
                   onChange={(e) => {
                     const value = e.currentTarget.value;
@@ -526,23 +518,21 @@ function FlowEditor({ cloudModels, providers, localModels }: FlowEditorProps) {
                       {st.name}
                     </option>
                   ))}
-                </select>
-                <span
-                  className="header-icon-btn"
-                  style={{ color: "#ff8783" }}
+                </Select>
+                <IconButton
+                  icon={IconTrash}
+                  iconSize={13}
+                  variant="danger"
                   onClick={() =>
                     updateState(selectedState.name, (s) => ({
                       ...s,
                       transitions: s.transitions.filter((_, idx) => idx !== i),
                     }))
                   }
-                >
-                  <IconTrash size={13} aria-hidden />
-                </span>
+                />
               </div>
             ))}
-            <div
-              className="form-btn"
+            <Button
               style={{ textAlign: "center" }}
               onClick={() =>
                 updateState(selectedState.name, (s) => ({
@@ -552,7 +542,7 @@ function FlowEditor({ cloudModels, providers, localModels }: FlowEditorProps) {
               }
             >
               + Add transition
-            </div>
+            </Button>
           </div>
         )}
       </div>
@@ -565,12 +555,10 @@ function FlowEditor({ cloudModels, providers, localModels }: FlowEditorProps) {
             </pre>
             {aiDraftError && <p className="settings-error">{aiDraftError}</p>}
             <div style={{ display: "flex", gap: 6, marginTop: 8 }}>
-              <div data-testid="flow-ai-insert" className="form-btn" onClick={handleInsertDraft}>
+              <Button data-testid="flow-ai-insert" onClick={handleInsertDraft}>
                 Insert into canvas
-              </div>
-              <div className="form-btn" onClick={() => setAiDraftRaw(null)}>
-                Discard
-              </div>
+              </Button>
+              <Button onClick={() => setAiDraftRaw(null)}>Discard</Button>
             </div>
           </div>
         )}
@@ -594,48 +582,37 @@ function FlowEditor({ cloudModels, providers, localModels }: FlowEditorProps) {
             <IconSparkles size={14} aria-hidden style={{ color: "var(--accent)" }} />
             <span style={{ fontSize: 11, color: "var(--text-3)" }}>Generate with AI</span>
             <div className="spacer" />
-            <div className="dropdown-wrap">
-              <div className="dropdown" onClick={() => setAiModelMenuOpen((v) => !v)}>
-                <span>{aiModelLabel}</span>
-                <IconChevronDown size={12} aria-hidden />
-              </div>
-              {aiModelMenuOpen && (
-                <div className="option-menu open" onMouseLeave={() => setAiModelMenuOpen(false)}>
-                  {chatLocalModels.map((m) => (
-                    <div
-                      key={m.name}
-                      className={`option-item${aiModel === `${LOCAL_MODEL_PREFIX}${m.name}` ? " sel" : ""}`}
-                      onClick={() => {
-                        setAiModel(`${LOCAL_MODEL_PREFIX}${m.name}`);
-                        setAiModelMenuOpen(false);
-                      }}
-                    >
-                      {m.name}
-                      <span className="option-sub">{m.loaded ? "loaded" : ""}</span>
-                    </div>
-                  ))}
-                  {Array.from(cloudGroups.entries()).map(([provider, models]) => (
-                    <div key={provider}>
-                      <div className="cmdk-group-label" style={{ padding: "4px 8px" }}>
-                        {provider.toUpperCase()}
-                      </div>
-                      {models.map((m) => (
-                        <div
-                          key={m.id}
-                          className={`option-item${aiModel === m.id ? " sel" : ""}`}
-                          onClick={() => {
-                            setAiModel(m.id);
-                            setAiModelMenuOpen(false);
-                          }}
-                        >
-                          {m.label}
-                        </div>
-                      ))}
-                    </div>
-                  ))}
+            <DropdownMenu
+              open={aiModelMenuOpen}
+              onOpenChange={setAiModelMenuOpen}
+              trigger={
+                <div className="dropdown" onClick={() => setAiModelMenuOpen((v) => !v)}>
+                  <span>{aiModelLabel}</span>
+                  <IconChevronDown size={12} aria-hidden />
                 </div>
-              )}
-            </div>
+              }
+              groups={[
+                {
+                  label: chatLocalModels.length > 0 ? "LOCAL" : undefined,
+                  items: chatLocalModels.map((m) => ({
+                    key: m.name,
+                    label: m.name,
+                    sublabel: m.loaded ? "loaded" : undefined,
+                    selected: aiModel === `${LOCAL_MODEL_PREFIX}${m.name}`,
+                    onSelect: () => setAiModel(`${LOCAL_MODEL_PREFIX}${m.name}`),
+                  })),
+                },
+                ...Array.from(cloudGroups.entries()).map(([provider, models]): DropdownMenuGroup => ({
+                  label: provider.toUpperCase(),
+                  items: models.map((m) => ({
+                    key: m.id,
+                    label: m.label,
+                    selected: aiModel === m.id,
+                    onSelect: () => setAiModel(m.id),
+                  })),
+                })),
+              ]}
+            />
             <div
               data-testid="flow-ai-send"
               className={`send${!aiPrompt.trim() || aiBusy || !aiModel ? " disabled" : ""}`}

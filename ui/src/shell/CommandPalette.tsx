@@ -10,6 +10,7 @@ import {
   IconLayoutSidebar,
 } from "@tabler/icons-react";
 import { useShellStore } from "../store/shellStore";
+import { Overlay } from "../components/ui";
 import type { ConversationSummary, LocalModelInfo } from "../types";
 
 interface CommandPaletteProps {
@@ -32,15 +33,7 @@ function CommandPalette({ conversations, localModels, onSelectConversation, onNe
   }
 
   return (
-    <div
-      className="cmdk-overlay"
-      onClick={(e) => {
-        if (e.target === e.currentTarget) setCmdkOpen(false);
-      }}
-      onKeyDown={(e) => {
-        if (e.key === "Escape") setCmdkOpen(false);
-      }}
-    >
+    <Overlay className="cmdk-overlay" onClose={() => setCmdkOpen(false)}>
       <div className="cmdk-card">
         <Command label="Command palette" shouldFilter>
           <div className="cmdk-input-row">
@@ -104,7 +97,7 @@ function CommandPalette({ conversations, localModels, onSelectConversation, onNe
           </Command.List>
         </Command>
       </div>
-    </div>
+    </Overlay>
   );
 }
 

@@ -2,6 +2,7 @@ import { lazy, Suspense, useEffect, useState } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import { Toaster } from "sonner";
 import { IconFileText, IconBold, IconItalic, IconUnderline } from "@tabler/icons-react";
+import { IconButton } from "./components/ui";
 import "./styles/shell.css";
 import TopBar from "./shell/TopBar";
 import SidebarShell from "./shell/SidebarShell";
@@ -131,15 +132,9 @@ function App() {
             <div className="main-header">
               <span className="meta">{activeExtra.title}</span>
               <div className="header-toolbar">
-                <div className="header-icon-btn">
-                  <IconBold size={14} aria-hidden />
-                </div>
-                <div className="header-icon-btn">
-                  <IconItalic size={14} aria-hidden />
-                </div>
-                <div className="header-icon-btn">
-                  <IconUnderline size={14} aria-hidden />
-                </div>
+                <IconButton icon={IconBold} iconSize={14} aria-label="Bold" />
+                <IconButton icon={IconItalic} iconSize={14} aria-label="Italic" />
+                <IconButton icon={IconUnderline} iconSize={14} aria-label="Underline" />
               </div>
             </div>
           )}

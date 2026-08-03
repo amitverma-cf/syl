@@ -1,5 +1,6 @@
 import { IconSparkles, IconDownload, IconPlug } from "@tabler/icons-react";
 import { useShellStore } from "../store/shellStore";
+import { Overlay } from "../components/ui";
 
 function OnboardingOverlay() {
   const { onboardingOpen, dismissOnboarding, openSettings } = useShellStore();
@@ -7,12 +8,7 @@ function OnboardingOverlay() {
   if (!onboardingOpen) return null;
 
   return (
-    <div
-      className="onboarding-overlay open"
-      onClick={(e) => {
-        if (e.target === e.currentTarget) dismissOnboarding();
-      }}
-    >
+    <Overlay className="onboarding-overlay open" onClose={dismissOnboarding}>
       <div className="onboarding-card">
         <IconSparkles className="logo" aria-hidden />
         <h2>Welcome to syl</h2>
@@ -52,7 +48,7 @@ function OnboardingOverlay() {
           Skip for now
         </div>
       </div>
-    </div>
+    </Overlay>
   );
 }
 

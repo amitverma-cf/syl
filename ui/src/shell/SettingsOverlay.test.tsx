@@ -72,7 +72,7 @@ describe("SettingsOverlay", () => {
     useShellStore.setState({ settingsOpen: true, settingsPane: "models" });
     render(<SettingsOverlay {...baseProps} />);
 
-    fireEvent.click(screen.getByRole("heading", { name: "AI Providers & Models" }).parentElement!.querySelector(".header-icon-btn")!);
+    fireEvent.click(screen.getByRole("button", { name: "Close settings" }));
 
     expect(useShellStore.getState().settingsOpen).toBe(false);
   });

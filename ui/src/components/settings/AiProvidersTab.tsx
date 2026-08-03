@@ -2,6 +2,7 @@ import { useState } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import { toast } from "sonner";
 import { IconDownload, IconTrash } from "@tabler/icons-react";
+import { Button, IconButton, Input, Badge } from "../ui";
 import {
   formatBytes,
   type CatalogModel,
@@ -146,7 +147,7 @@ function AiProvidersTab({
           <span style={{ width: 90, flexShrink: 0, fontSize: 12, color: "rgba(255,255,255,.7)" }}>
             {p.name}
           </span>
-          <input
+          <Input
             type="password"
             value={keyDrafts[p.envVar] ?? ""}
             onChange={(e) => {
@@ -154,16 +155,11 @@ function AiProvidersTab({
               setKeyDrafts((prev) => ({ ...prev, [p.envVar]: value }));
             }}
             placeholder={p.configured ? "Key saved — enter to replace" : "API key"}
-            className="form-input"
           />
-          <button
-            onClick={() => handleSaveKey(p.envVar)}
-            disabled={savingProvider === p.envVar || !keyDrafts[p.envVar]}
-            className="form-btn"
-          >
+          <Button onClick={() => handleSaveKey(p.envVar)} disabled={savingProvider === p.envVar || !keyDrafts[p.envVar]}>
             Save
-          </button>
-          {p.configured && <span className="pill">configured</span>}
+          </Button>
+          {p.configured && <Badge>configured</Badge>}
         </div>
       ))}
 
@@ -184,30 +180,27 @@ function AiProvidersTab({
         </div>
       ))}
       <form onSubmit={handleAddCustomProvider} className="form-row">
-        <input
+        <Input
           value={newProviderName}
           onChange={(e) => setNewProviderName(e.currentTarget.value)}
           placeholder="Name"
-          className="form-input"
           style={{ flex: "0 0 110px" }}
         />
-        <input
+        <Input
           value={newProviderUrl}
           onChange={(e) => setNewProviderUrl(e.currentTarget.value)}
           placeholder="Base URL"
-          className="form-input"
         />
-        <input
+        <Input
           type="password"
           value={newProviderKey}
           onChange={(e) => setNewProviderKey(e.currentTarget.value)}
           placeholder="API key (optional)"
-          className="form-input"
           style={{ flex: "0 0 140px" }}
         />
-        <button type="submit" disabled={addingProvider} className="form-btn">
+        <Button type="submit" disabled={addingProvider}>
           {addingProvider ? "Fetching…" : "Add"}
-        </button>
+        </Button>
       </form>
 
       <div className="settings-section-title">Local models</div>
@@ -238,14 +231,14 @@ function AiProvidersTab({
                 ))}
               </div>
             )}
-            <span
-              className="header-icon-btn"
+            <IconButton
+              icon={IconTrash}
+              iconSize={14}
+              variant="danger"
               title="Delete"
               onClick={() => deletingModel !== m.name && handleDeleteModel(m.name)}
-              style={{ opacity: deletingModel === m.name ? 0.5 : 1, color: "#ff8783" }}
-            >
-              <IconTrash size={14} aria-hidden />
-            </span>
+              style={{ opacity: deletingModel === m.name ? 0.5 : 1 }}
+            />
           </div>
         </div>
       ))}
@@ -264,7 +257,7 @@ function AiProvidersTab({
             </div>
           </div>
           {m.alreadyDownloaded ? (
-            <span className="pill">downloaded</span>
+            <Badge>downloaded</Badge>
           ) : (
             <div
               className="catalog-download-btn"

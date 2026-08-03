@@ -1,3 +1,4 @@
+import { Badge } from "../ui";
 import { formatBytes, type ConversationSummary, type SystemStats } from "../../types";
 
 interface MemoryTabProps {
@@ -20,14 +21,14 @@ function MemoryTab({ stats, conversations }: MemoryTabProps) {
           <div className="name">Conversations</div>
           <div className="kind">stored in the local database</div>
         </div>
-        <span className="pill">{conversations.length}</span>
+        <Badge>{conversations.length}</Badge>
       </div>
       <div className="model-row">
         <div>
           <div className="name">Workspace disk usage</div>
           <div className="kind">.syl workspace directory</div>
         </div>
-        <span className="pill">{stats ? formatBytes(stats.workspaceDiskBytes) : "—"}</span>
+        <Badge>{stats ? formatBytes(stats.workspaceDiskBytes) : "—"}</Badge>
       </div>
     </div>
   );
