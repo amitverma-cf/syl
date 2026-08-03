@@ -1,16 +1,18 @@
-import { useEffect, useState } from "react";
+import { lazy, Suspense, useEffect, useState } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import { Toaster } from "sonner";
-import { IconFileText, IconWorld, IconBold, IconItalic, IconUnderline } from "@tabler/icons-react";
+import { IconFileText, IconBold, IconItalic, IconUnderline } from "@tabler/icons-react";
 import "./styles/shell.css";
 import TopBar from "./shell/TopBar";
 import SidebarShell from "./shell/SidebarShell";
 import StatusBar from "./shell/StatusBar";
-import CommandPalette from "./shell/CommandPalette";
 import OnboardingOverlay from "./shell/OnboardingOverlay";
-import SettingsOverlay from "./shell/SettingsOverlay";
-import { TextTabView, BrowserTabView, FlowTabView } from "./shell/ExtraTabViews";
+import { TextTabView } from "./shell/ExtraTabViews";
 import ChatPanel from "./components/ChatPanel";
+
+const CommandPalette = lazy(() => import("./shell/CommandPalette"));
+const SettingsOverlay = lazy(() => import("./shell/SettingsOverlay"));
+const FlowEditor = lazy(() => import("./shell/FlowEditor"));
 import { useShellStore } from "./store/shellStore";
 import { useConversations } from "./hooks/useConversations";
 import { useLocalModels } from "./hooks/useLocalModels";
@@ -60,6 +62,7 @@ function App() {
     openConversationTab,
     closeTab,
     setActiveTab,
+    openExtraTab,
     onboardingOpen,
     setOnboardingOpen,
     onboardingDismissed,
@@ -93,7 +96,6 @@ function App() {
   }, []);
 
   async function handleDeleteConversation(id: string) {
-    if (!confirm("Delete this conversation?")) return;
     await invoke("delete_conversation", { id });
     handleDeleted(id);
     closeTab(id);
@@ -110,7 +112,11 @@ function App() {
   return (
     <div className="shell-window" data-platform={useShellStore((s) => s.platform)}>
       <Toaster theme="dark" position="bottom-right" toastOptions={{ style: { fontSize: 12.5 } }} />
-      <TopBar conversations={conversations} onNewChat={handleNewChat} />
+      <TopBar
+        conversations={conversations}
+        onNewChat={handleNewChat}
+        onOpenFlowEditor={() => openExtraTab("flow")}
+      />
 
       <div className="shell-body">
         <SidebarShell
@@ -121,27 +127,20 @@ function App() {
         />
 
         <div className="main">
-          {(activeExtra?.type === "text" || activeExtra?.type === "browser") && (
+          {activeExtra?.type === "text" && (
             <div className="main-header">
               <span className="meta">{activeExtra.title}</span>
-              {activeExtra.type === "text" && (
-                <div className="header-toolbar">
-                  <div className="header-icon-btn">
-                    <IconBold size={14} aria-hidden />
-                  </div>
-                  <div className="header-icon-btn">
-                    <IconItalic size={14} aria-hidden />
-                  </div>
-                  <div className="header-icon-btn">
-                    <IconUnderline size={14} aria-hidden />
-                  </div>
+              <div className="header-toolbar">
+                <div className="header-icon-btn">
+                  <IconBold size={14} aria-hidden />
                 </div>
-              )}
-              {activeExtra.type === "browser" && (
-                <div className="header-toolbar">
-                  <IconWorld size={14} aria-hidden />
+                <div className="header-icon-btn">
+                  <IconItalic size={14} aria-hidden />
                 </div>
-              )}
+                <div className="header-icon-btn">
+                  <IconUnderline size={14} aria-hidden />
+                </div>
+              </div>
             </div>
           )}
 
@@ -185,13 +184,11 @@ function App() {
               <div className="view active">
                 <TextTabView tabId={activeExtra.id} />
               </div>
-            ) : activeExtra?.type === "browser" ? (
-              <div className="view active">
-                <BrowserTabView tabId={activeExtra.id} />
-              </div>
             ) : activeExtra?.type === "flow" ? (
               <div className="view active">
-                <FlowTabView activeConversationId={activeConversationId} />
+                <Suspense fallback={null}>
+                  <FlowEditor cloudModels={cloudModels} providers={providers} localModels={localModels} />
+                </Suspense>
               </div>
             ) : (
               <div className="empty-state">
@@ -208,29 +205,33 @@ function App() {
 
       <StatusBar stats={stats} loadedLocalModels={localModels.filter((m) => m.loaded)} />
 
-      <CommandPalette
-        conversations={conversations}
-        localModels={localModels}
-        onSelectConversation={selectConversation}
-        onNewChat={handleNewChat}
-      />
+      <Suspense fallback={null}>
+        <CommandPalette
+          conversations={conversations}
+          localModels={localModels}
+          onSelectConversation={selectConversation}
+          onNewChat={handleNewChat}
+        />
+      </Suspense>
       <OnboardingOverlay />
-      <SettingsOverlay
-        activeConversationId={activeConversationId}
-        providers={providers}
-        refreshProviders={refreshProviders}
-        customProviders={customProviders}
-        refreshCustomProviders={refreshCustomProviders}
-        cloudModels={cloudModels}
-        models={models}
-        refreshModels={refreshModels}
-        localModels={localModels}
-        refreshLocalModels={refreshLocalModels}
-        mcpServers={mcpServers}
-        refreshMcpServers={refreshMcpServers}
-        stats={stats}
-        conversations={conversations}
-      />
+      <Suspense fallback={null}>
+        <SettingsOverlay
+          activeConversationId={activeConversationId}
+          providers={providers}
+          refreshProviders={refreshProviders}
+          customProviders={customProviders}
+          refreshCustomProviders={refreshCustomProviders}
+          cloudModels={cloudModels}
+          models={models}
+          refreshModels={refreshModels}
+          localModels={localModels}
+          refreshLocalModels={refreshLocalModels}
+          mcpServers={mcpServers}
+          refreshMcpServers={refreshMcpServers}
+          stats={stats}
+          conversations={conversations}
+        />
+      </Suspense>
     </div>
   );
 }

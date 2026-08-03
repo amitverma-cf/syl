@@ -1,0 +1,5 @@
+{
+  "spec": "specs/**/*.spec.js",
+  "timeout": 60000,
+  "slow": 5000
+}

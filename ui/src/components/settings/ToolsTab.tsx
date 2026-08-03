@@ -13,21 +13,25 @@ function ToolsTab() {
   }, []);
 
   return (
-    <div className="flex flex-col gap-2">
-      <h2 className="text-sm font-medium">Registered tools</h2>
-      <p className="text-xs text-neutral-500">
+    <div>
+      <div className="settings-section-title" style={{ marginTop: 0 }}>
+        Registered tools
+      </div>
+      <p style={{ fontSize: 11.5, color: "var(--text-3)", margin: "0 0 10px", lineHeight: 1.5 }}>
         Every tool the active flow can hand to a model — native tools plus anything discovered
         from connected MCP servers. Permission prompts appear in the chat when a tool requiring
         approval is called.
       </p>
-      {tools.length === 0 && <p className="text-sm text-neutral-500">No tools registered.</p>}
+      {tools.length === 0 && <p style={{ fontSize: 12, color: "var(--text-3)" }}>No tools registered.</p>}
       {tools.map((t) => (
-        <div key={t.name} className="rounded border border-neutral-800 px-3 py-2 text-sm">
-          <span className="font-mono text-neutral-200">{t.name}</span>
-          <p className="mt-1 text-xs text-neutral-400">{t.description}</p>
+        <div key={t.name} className="model-row" style={{ flexDirection: "column", alignItems: "stretch" }}>
+          <div className="name">{t.name}</div>
+          <div className="kind" style={{ marginTop: 3 }}>
+            {t.description}
+          </div>
         </div>
       ))}
-      {error && <p className="text-sm text-red-400">{error}</p>}
+      {error && <p className="settings-error">{error}</p>}
     </div>
   );
 }

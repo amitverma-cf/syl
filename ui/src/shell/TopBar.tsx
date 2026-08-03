@@ -1,4 +1,5 @@
 import { useEffect, useRef } from "react";
+import { invoke } from "@tauri-apps/api/core";
 import { getCurrentWindow } from "@tauri-apps/api/window";
 import {
   IconMenu2,
@@ -13,7 +14,6 @@ import {
   IconSquare,
   IconTopologyStar3,
   IconFileText,
-  IconWorld,
 } from "@tabler/icons-react";
 import { useShellStore } from "../store/shellStore";
 import type { ConversationSummary } from "../types";
@@ -25,6 +25,7 @@ const appWindow = isTauri ? getCurrentWindow() : null;
 interface TopBarProps {
   conversations: ConversationSummary[];
   onNewChat: () => void;
+  onOpenFlowEditor: () => void;
 }
 
 function tabIcon(type: string) {
@@ -33,14 +34,12 @@ function tabIcon(type: string) {
       return <IconTopologyStar3 aria-hidden />;
     case "text":
       return <IconFileText aria-hidden />;
-    case "browser":
-      return <IconWorld aria-hidden />;
     default:
       return <IconMessageCircle aria-hidden />;
   }
 }
 
-function TopBar({ conversations, onNewChat }: TopBarProps) {
+function TopBar({ conversations, onNewChat, onOpenFlowEditor }: TopBarProps) {
   const {
     platform,
     toggleSidebar,
@@ -100,6 +99,16 @@ function TopBar({ conversations, onNewChat }: TopBarProps) {
           >
             Show welcome guide
           </div>
+          <div
+            className="app-menu-item"
+            data-testid="app-menu-quit"
+            onClick={() => {
+              setAppMenuOpen(false);
+              invoke("quit_app");
+            }}
+          >
+            Quit
+          </div>
         </div>
       </div>
 
@@ -117,6 +126,10 @@ function TopBar({ conversations, onNewChat }: TopBarProps) {
         <div className="topbar-btn" onClick={onNewChat} title="New chat">
           <IconPlus size={16} aria-hidden />
         </div>
+      </div>
+
+      <div className="topbar-btn" onClick={onOpenFlowEditor} title="Open flow editor">
+        <IconTopologyStar3 size={15} aria-hidden />
       </div>
 
       <div className="tab-scroll">

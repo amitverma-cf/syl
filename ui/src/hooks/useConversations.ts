@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import type { ConversationSummary } from "../types";
 
@@ -6,16 +6,16 @@ export function useConversations(onError: (message: string) => void) {
   const [conversations, setConversations] = useState<ConversationSummary[]>([]);
   const [activeConversationId, setActiveConversationId] = useState<string | null>(null);
 
-  function refresh() {
+  const refresh = useCallback(() => {
     invoke<ConversationSummary[]>("list_conversations")
       .then((list) => {
         setConversations(list);
         setActiveConversationId((current) => current ?? list[0]?.id ?? null);
       })
       .catch((err) => onError(String(err)));
-  }
+  }, [onError]);
 
-  useEffect(refresh, []);
+  useEffect(refresh, [refresh]);
 
   async function newChat() {
     const id = crypto.randomUUID();

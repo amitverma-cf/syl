@@ -23,6 +23,9 @@ import type {
   ProviderInfo,
   StoredMessage,
 } from "../types";
+import { useAutoGrowTextarea } from "../hooks/useAutoGrowTextarea";
+import { useShellStore } from "../store/shellStore";
+import { cloudContextWindow, countTokens, localContextSize } from "../lib/tokens";
 
 const LOCAL_MODEL_PREFIX = "local::";
 
@@ -50,10 +53,6 @@ function groupCloudModelsByProvider(
   return groups;
 }
 
-function estimateTokens(text: string): number {
-  return Math.max(1, Math.round(text.length / 4));
-}
-
 function ChatPanel({
   conversationId,
   cloudModels,
@@ -64,22 +63,18 @@ function ChatPanel({
 }: ChatPanelProps) {
   const [messages, setMessages] = useState<StoredMessage[]>([]);
   const [prompt, setPrompt] = useState("");
+  const promptRef = useAutoGrowTextarea<HTMLTextAreaElement>(prompt);
   const [isGenerating, setIsGenerating] = useState(false);
   const [isLoadingModel, setIsLoadingModel] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const [selectedModel, setSelectedModel] = useState<string>("");
+  const [selectedModelOverride, setSelectedModel] = useState<string | null>(null);
   const [modelMenuOpen, setModelMenuOpen] = useState(false);
   const [activeFlow, setActiveFlow] = useState<FlowStateInfo | null>(null);
   const [permissionRequest, setPermissionRequest] = useState<PermissionRequest | null>(null);
   const transcriptRef = useRef<HTMLDivElement>(null);
 
-  const [selectedImageModel, setSelectedImageModel] = useState("");
   const [isGeneratingImage, setIsGeneratingImage] = useState(false);
-
-  const [selectedAsrModel, setSelectedAsrModel] = useState("");
   const [isRecording, setIsRecording] = useState(false);
-
-  const [selectedTtsModel, setSelectedTtsModel] = useState("");
   const [isSpeaking, setIsSpeaking] = useState(false);
 
   const cloudGroups = groupCloudModelsByProvider(cloudModels, providers);
@@ -88,33 +83,36 @@ function ChatPanel({
   const asrModels = localModels.filter((m) => m.kind === "asr");
   const ttsModels = localModels.filter((m) => m.kind === "tts");
 
-  useEffect(() => {
-    if (selectedModel) return;
-    if (chatLocalModels.length > 0) {
-      setSelectedModel(`${LOCAL_MODEL_PREFIX}${chatLocalModels[0].name}`);
-    } else if (cloudModels.length > 0) {
-      setSelectedModel(cloudModels[0].id);
-    }
-  }, [chatLocalModels, cloudModels, selectedModel]);
+  const defaultModel =
+    chatLocalModels.length > 0 ? `${LOCAL_MODEL_PREFIX}${chatLocalModels[0].name}` : (cloudModels[0]?.id ?? "");
+  const selectedModel = selectedModelOverride ?? defaultModel;
+
+  const selectedImageModel = imageModels[0]?.name ?? "";
+  const selectedAsrModel = asrModels[0]?.name ?? "";
+  const selectedTtsModel = ttsModels[0]?.name ?? "";
 
   useEffect(() => {
-    if (!selectedImageModel && imageModels.length > 0) setSelectedImageModel(imageModels[0].name);
-  }, [imageModels, selectedImageModel]);
-  useEffect(() => {
-    if (!selectedAsrModel && asrModels.length > 0) setSelectedAsrModel(asrModels[0].name);
-  }, [asrModels, selectedAsrModel]);
-  useEffect(() => {
-    if (!selectedTtsModel && ttsModels.length > 0) setSelectedTtsModel(ttsModels[0].name);
-  }, [ttsModels, selectedTtsModel]);
-
-  useEffect(() => {
-    setError(null);
+    let cancelled = false;
     invoke<StoredMessage[]>("list_messages", { conversationId })
-      .then(setMessages)
-      .catch((err) => setError(String(err)));
+      .then((msgs) => {
+        if (!cancelled) {
+          setMessages(msgs);
+          setError(null);
+        }
+      })
+      .catch((err) => {
+        if (!cancelled) setError(String(err));
+      });
     invoke<FlowStateInfo | null>("flow_status", { conversationId })
-      .then(setActiveFlow)
-      .catch((err) => setError(String(err)));
+      .then((flow) => {
+        if (!cancelled) setActiveFlow(flow);
+      })
+      .catch((err) => {
+        if (!cancelled) setError(String(err));
+      });
+    return () => {
+      cancelled = true;
+    };
   }, [conversationId]);
 
   useEffect(() => {
@@ -150,6 +148,30 @@ function ChatPanel({
   const selectedModelLabel = isLocalModel
     ? selectedLocalModelName
     : cloudModels.find((m) => m.id === selectedModel)?.label ?? "Select a model";
+
+  const [tokenCounts, setTokenCounts] = useState<number[]>([]);
+  const setContextUsage = useShellStore((s) => s.setContextUsage);
+
+  useEffect(() => {
+    // Skip while streaming — the last message's content changes on every
+    // piece, and re-tokenizing it (an IPC round trip for local models) on
+    // every chunk would spam the backend for no benefit; it settles once
+    // generation finishes.
+    if (isGenerating || !selectedModel) return;
+    let cancelled = false;
+    (async () => {
+      const counts = await Promise.all(messages.map((m) => countTokens(selectedModel, m.content)));
+      if (cancelled) return;
+      setTokenCounts(counts);
+      const usedTokens = counts.reduce((a, b) => a + b, 0);
+      const totalTokens = isLocalModel ? await localContextSize() : cloudContextWindow(selectedModel);
+      if (cancelled) return;
+      setContextUsage(conversationId, { usedTokens, totalTokens, modelLabel: selectedModelLabel });
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [messages, selectedModel, isGenerating, isLocalModel, conversationId, selectedModelLabel, setContextUsage]);
 
   async function loadSelectedLocalModel() {
     if (!isLocalModel || selectedLocalModelLoaded) return;
@@ -389,7 +411,7 @@ function ChatPanel({
                   <IconVolume size={13} aria-hidden />
                 </div>
                 <span className="msg-time">{new Date(m.createdAt * 1000).toLocaleTimeString()}</span>
-                <span className="msg-tokens">{estimateTokens(m.content)} tok</span>
+                <span className="msg-tokens">{tokenCounts[i] ?? "…"} tok</span>
               </div>
             </div>
           ),
@@ -406,6 +428,7 @@ function ChatPanel({
       <div className="composer-wrap">
         <form className="composer" onSubmit={handleSubmit}>
           <textarea
+            ref={promptRef}
             className="input"
             value={prompt}
             onChange={(e) => setPrompt(e.currentTarget.value)}

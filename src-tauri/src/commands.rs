@@ -14,6 +14,29 @@ use crate::flows::{default_flow_name, FlowState};
 use crate::local_models::LocalModelState;
 use crate::{AppState, ToolState};
 
+/// Fully exits the app. The window's own close button just hides it (so the
+/// app keeps running in the tray, matching the tray menu's existing
+/// behavior) — this is the one real way to actually quit from inside the UI
+/// itself, e.g. from the app menu.
+#[tauri::command]
+pub fn quit_app(app: tauri::AppHandle) {
+    app.exit(0);
+}
+
+/// Grants the fs plugin read/write access to a directory the user just
+/// picked via the native folder dialog. The capability file declares no
+/// static path scope for fs commands (so by default nothing outside the
+/// app's own workspace is reachable) — this is what actually opens up a
+/// user-chosen folder, scoped to exactly what they picked rather than the
+/// whole disk.
+#[tauri::command]
+pub fn grant_folder_access(path: String, app: tauri::AppHandle) -> Result<(), String> {
+    use tauri_plugin_fs::FsExt;
+    app.fs_scope()
+        .allow_directory(&path, true)
+        .map_err(|e| e.to_string())
+}
+
 #[derive(Clone, serde::Serialize)]
 #[serde(rename_all = "camelCase", tag = "type")]
 pub enum GenerationEvent {
@@ -139,6 +162,73 @@ pub async fn generate(
         }
     }
     Ok(())
+}
+
+const FLOW_GEN_SYSTEM_PROMPT: &str = r#"You design finite-state conversation flows for an agentic assistant. \
+Given a short description from the user, respond with ONLY a single JSON object (no prose, no markdown \
+code fences) matching exactly this schema:
+
+{
+  "name": "kebab-case-flow-name",
+  "initial_state": "name of one of the states below",
+  "states": [
+    {
+      "name": "state name",
+      "system_prompt": "the system prompt the assistant should use while in this state",
+      "tool_allowlist": ["tool_name", "..."],
+      "transitions": [ { "on": "trigger keyword or condition", "to_state": "another state name" } ]
+    }
+  ]
+}
+
+Rules: every to_state must reference a state that exists in "states". The first state should represent \
+the start of the conversation. At least one state should have an empty "transitions" array to represent \
+a natural end of the flow. Keep tool_allowlist empty unless the description clearly calls for a specific \
+tool. Output nothing but the JSON object."#;
+
+#[tauri::command]
+pub async fn generate_flow_draft(
+    prompt: String,
+    model: Option<String>,
+    local_model: Option<String>,
+    local_model_state: tauri::State<'_, LocalModelState>,
+) -> Result<String, String> {
+    let cloud_model = model.filter(|m| !m.is_empty());
+    let local_model_name = local_model.filter(|m| !m.is_empty());
+
+    match cloud_model {
+        Some(model_id) => {
+            let client = provider::build_client(
+                &workspace_paths::env_file(),
+                &workspace_paths::custom_providers_file(),
+            );
+            provider::stream_chat(
+                &client,
+                &model_id,
+                Some(FLOW_GEN_SYSTEM_PROMPT),
+                &prompt,
+                |_piece| {},
+            )
+            .await
+            .map_err(|e| e.to_string())
+        }
+        None => {
+            let name = local_model_name.ok_or_else(|| "no model specified".to_string())?;
+            let engine = local_model_state.get_loaded(&name).ok_or_else(|| {
+                format!("local model {name} is not loaded; load it first in Settings")
+            })?;
+            let full_prompt = format!("{FLOW_GEN_SYSTEM_PROMPT}\n\nUser: {prompt}\nAssistant:");
+            let max_tokens = app_config().local_engine.max_tokens;
+            tauri::async_runtime::spawn_blocking(move || {
+                let mut engine = crate::sync::lock(&engine);
+                engine
+                    .generate(&full_prompt, max_tokens, |_piece: &str| {})
+                    .map_err(|e| e.to_string())
+            })
+            .await
+            .map_err(|e| e.to_string())?
+        }
+    }
 }
 
 fn send_piece(on_event: &Channel<GenerationEvent>, piece: &str) {

@@ -26,7 +26,7 @@ pub struct FlowState {
     pub name: String,
     pub system_prompt: String,
     pub tool_allowlist: Vec<String>,
-    #[serde(default)]
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub on_enter_tool_call: Option<ToolCallSpec>,
     pub transitions: Vec<Transition>,
 }

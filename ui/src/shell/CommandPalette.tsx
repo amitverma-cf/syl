@@ -7,7 +7,6 @@ import {
   IconPlus,
   IconTopologyStar3,
   IconFileText,
-  IconWorld,
   IconLayoutSidebar,
 } from "@tabler/icons-react";
 import { useShellStore } from "../store/shellStore";
@@ -92,10 +91,6 @@ function CommandPalette({ conversations, localModels, onSelectConversation, onNe
               <Command.Item onSelect={() => run(() => openExtraTab("text"))}>
                 <IconFileText aria-hidden />
                 New text file
-              </Command.Item>
-              <Command.Item onSelect={() => run(() => openExtraTab("browser"))}>
-                <IconWorld aria-hidden />
-                New browser tab
               </Command.Item>
               <Command.Item onSelect={() => run(toggleSidebar)}>
                 <IconLayoutSidebar aria-hidden />

@@ -180,6 +180,14 @@ impl LlamaEngine {
         Ok(embedding)
     }
 
+    /// Real token count for `text` using this model's own vocabulary — the
+    /// same tokenizer `generate`/`embed` use to build their prompts, not an
+    /// approximation.
+    pub fn count_tokens(&self, text: &str) -> Result<usize, LlamaError> {
+        let vocab = unsafe { self.lib.llama_model_get_vocab(self.model) };
+        Ok(self.tokenize(vocab, text, true)?.len())
+    }
+
     fn tokenize(
         &self,
         vocab: *const crate::bindings::llama_vocab,

@@ -103,6 +103,25 @@ export interface ScheduledJob {
   model: string | null;
 }
 
+export interface FlowTransition {
+  on: string;
+  to_state: string;
+}
+
+export interface FlowStateDef {
+  name: string;
+  system_prompt: string;
+  tool_allowlist: string[];
+  on_enter_tool_call?: { tool: string; args: unknown } | null;
+  transitions: FlowTransition[];
+}
+
+export interface FlowDef {
+  name: string;
+  initial_state: string;
+  states: FlowStateDef[];
+}
+
 export function formatBytes(bytes: number): string {
   const gb = bytes / 1024 / 1024 / 1024;
   if (gb >= 1) return `${gb.toFixed(1)} GB`;

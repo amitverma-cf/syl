@@ -1,4 +1,4 @@
-import { useEffect } from "react";
+import { useCallback, useEffect } from "react";
 import { invoke } from "@tauri-apps/api/core";
 
 export function useInvokeResource<T>(
@@ -6,11 +6,11 @@ export function useInvokeResource<T>(
   set: (value: T) => void,
   onError: (message: string) => void,
 ): () => void {
-  function refresh() {
+  const refresh = useCallback(() => {
     invoke<T>(command)
       .then(set)
       .catch((err) => onError(String(err)));
-  }
-  useEffect(refresh, []);
+  }, [command, set, onError]);
+  useEffect(refresh, [refresh]);
   return refresh;
 }

@@ -1,5 +1,6 @@
 import { useRef, useState } from "react";
-import { readDir, readTextFile, writeTextFile, mkdir } from "@tauri-apps/plugin-fs";
+import { invoke } from "@tauri-apps/api/core";
+import { readDir, readTextFile, writeTextFile, mkdir, rename, remove } from "@tauri-apps/plugin-fs";
 import { open as openDialog } from "@tauri-apps/plugin-dialog";
 import {
   IconMessages,
@@ -14,24 +15,15 @@ import {
   IconChevronRight,
   IconChevronDown,
   IconLayoutSidebarLeftCollapse,
+  IconCheck,
+  IconX,
+  IconPencil,
 } from "@tabler/icons-react";
 import { useShellStore } from "../store/shellStore";
 import type { ConversationSummary } from "../types";
+import { joinPath, parentOf, updateNode, type TreeNode } from "./folderTree";
 
 const isTauri = typeof window !== "undefined" && "__TAURI_INTERNALS__" in window;
-
-interface TreeNode {
-  name: string;
-  path: string;
-  isDir: boolean;
-  expanded: boolean;
-  children: TreeNode[] | null;
-}
-
-function joinPath(base: string, name: string): string {
-  const sep = base.includes("\\") && !base.includes("/") ? "\\" : "/";
-  return base.endsWith(sep) ? `${base}${name}` : `${base}${sep}${name}`;
-}
 
 async function loadDir(path: string): Promise<TreeNode[]> {
   const entries = await readDir(path);
@@ -49,14 +41,6 @@ async function loadDir(path: string): Promise<TreeNode[]> {
     });
 }
 
-function updateNode(nodes: TreeNode[], path: string, fn: (n: TreeNode) => TreeNode): TreeNode[] {
-  return nodes.map((n) => {
-    if (n.path === path) return fn(n);
-    if (n.children) return { ...n, children: updateNode(n.children, path, fn) };
-    return n;
-  });
-}
-
 interface SidebarShellProps {
   conversations: ConversationSummary[];
   activeConversationId: string | null;
@@ -67,10 +51,16 @@ interface SidebarShellProps {
 function SidebarShell({ conversations, activeConversationId, onSelect, onDelete }: SidebarShellProps) {
   const { sidebarTab, setSidebarTab, sidebarWidth, setSidebarWidth, sidebarCollapsed, openSettings, openExtraTab } =
     useShellStore();
+  const [confirmDeleteId, setConfirmDeleteId] = useState<string | null>(null);
   const [rootPath, setRootPath] = useState<string | null>(null);
   const [tree, setTree] = useState<TreeNode[]>([]);
   const [activeDir, setActiveDir] = useState<string | null>(null);
   const [folderError, setFolderError] = useState<string | null>(null);
+  const [pendingCreate, setPendingCreate] = useState<{ type: "file" | "folder"; dir: string } | null>(null);
+  const [createValue, setCreateValue] = useState("");
+  const [renamingPath, setRenamingPath] = useState<string | null>(null);
+  const [renameValue, setRenameValue] = useState("");
+  const [confirmDeletePath, setConfirmDeletePath] = useState<string | null>(null);
   const resizing = useRef(false);
 
   async function openFolder() {
@@ -81,6 +71,10 @@ function SidebarShell({ conversations, activeConversationId, onSelect, onDelete 
     try {
       const selected = await openDialog({ directory: true, multiple: false });
       if (!selected || Array.isArray(selected)) return;
+      // The capability file grants the fs plugin no path scope by default —
+      // this is what actually opens up read/write access to the folder the
+      // user just chose, rather than the app already having full-disk access.
+      await invoke("grant_folder_access", { path: selected });
       setRootPath(selected);
       setActiveDir(selected);
       setFolderError(null);
@@ -142,28 +136,79 @@ function SidebarShell({ conversations, activeConversationId, onSelect, onDelete 
     }
   }
 
-  async function createFile() {
+  function startCreateFile() {
     const dir = activeDir ?? rootPath;
     if (!dir) return;
-    const name = window.prompt("New file name:");
-    if (!name) return;
+    setRenamingPath(null);
+    setPendingCreate({ type: "file", dir });
+    setCreateValue("");
+  }
+
+  function startCreateFolder() {
+    const dir = activeDir ?? rootPath;
+    if (!dir) return;
+    setRenamingPath(null);
+    setPendingCreate({ type: "folder", dir });
+    setCreateValue("");
+  }
+
+  async function confirmCreate() {
+    if (!pendingCreate) return;
+    const { type, dir } = pendingCreate;
+    const name = createValue.trim();
+    if (!name) {
+      setPendingCreate(null);
+      return;
+    }
     try {
       const path = joinPath(dir, name);
-      await writeTextFile(path, "");
+      if (type === "file") {
+        await writeTextFile(path, "");
+      } else {
+        await mkdir(path);
+      }
+      setPendingCreate(null);
       await refreshTree();
-      openExtraTab("text", name, "", path);
+      if (type === "file") openExtraTab("text", name, "", path);
     } catch (err) {
       setFolderError(String(err));
+      setPendingCreate(null);
     }
   }
 
-  async function createFolder() {
-    const dir = activeDir ?? rootPath;
-    if (!dir) return;
-    const name = window.prompt("New folder name:");
-    if (!name) return;
+  function startRename(node: TreeNode) {
+    setPendingCreate(null);
+    setRenamingPath(node.path);
+    setRenameValue(node.name);
+  }
+
+  async function confirmRename(node: TreeNode) {
+    const name = renameValue.trim();
+    if (!name || name === node.name) {
+      setRenamingPath(null);
+      return;
+    }
     try {
-      await mkdir(joinPath(dir, name));
+      const newPath = joinPath(parentOf(node), name);
+      await rename(node.path, newPath);
+      setRenamingPath(null);
+      if (activeDir === node.path) setActiveDir(newPath);
+      await refreshTree();
+    } catch (err) {
+      setFolderError(String(err));
+      setRenamingPath(null);
+    }
+  }
+
+  async function deleteNode(node: TreeNode) {
+    if (confirmDeletePath !== node.path) {
+      setConfirmDeletePath(node.path);
+      return;
+    }
+    setConfirmDeletePath(null);
+    try {
+      await remove(node.path, node.isDir ? { recursive: true } : undefined);
+      if (activeDir === node.path) setActiveDir(rootPath);
       await refreshTree();
     } catch (err) {
       setFolderError(String(err));
@@ -191,26 +236,123 @@ function SidebarShell({ conversations, activeConversationId, onSelect, onDelete 
   function renderTree(nodes: TreeNode[], depth: number) {
     return nodes.map((node) => (
       <div key={node.path}>
-        <div
-          className={`folder-item${node.isDir ? " dir" : ""}`}
-          style={{ marginLeft: depth * 14 }}
-          onClick={() => (node.isDir ? toggleDir(node) : openFile(node))}
-        >
-          {node.isDir ? (
-            node.expanded ? (
-              <IconChevronDown size={12} aria-hidden />
-            ) : (
-              <IconChevronRight size={12} aria-hidden />
-            )
-          ) : (
+        {renamingPath === node.path ? (
+          <div className="folder-item" style={{ marginLeft: depth * 14 }} data-testid="rename-row">
             <span style={{ width: 12, flexShrink: 0 }} />
-          )}
-          {node.isDir ? <IconFolder size={14} aria-hidden /> : <IconFile size={14} aria-hidden />}
-          {node.name}
-        </div>
+            {node.isDir ? <IconFolder size={14} aria-hidden /> : <IconFile size={14} aria-hidden />}
+            <input
+              data-testid="rename-input"
+              className="form-input"
+              style={{ flex: 1, padding: "2px 6px" }}
+              autoFocus
+              value={renameValue}
+              onClick={(e) => e.stopPropagation()}
+              onChange={(e) => setRenameValue(e.currentTarget.value)}
+              onKeyDown={(e) => {
+                if (e.key === "Enter") confirmRename(node);
+                if (e.key === "Escape") setRenamingPath(null);
+              }}
+              onBlur={() => confirmRename(node)}
+            />
+          </div>
+        ) : (
+          <div
+            className={`folder-item${node.isDir ? " dir" : ""}`}
+            style={{ marginLeft: depth * 14 }}
+            onClick={() => (node.isDir ? toggleDir(node) : openFile(node))}
+          >
+            {node.isDir ? (
+              node.expanded ? (
+                <IconChevronDown size={12} aria-hidden />
+              ) : (
+                <IconChevronRight size={12} aria-hidden />
+              )
+            ) : (
+              <span style={{ width: 12, flexShrink: 0 }} />
+            )}
+            {node.isDir ? <IconFolder size={14} aria-hidden /> : <IconFile size={14} aria-hidden />}
+            <span style={{ flex: 1, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+              {node.name}
+            </span>
+            {confirmDeletePath === node.path ? (
+              <>
+                <span
+                  data-testid="node-delete-yes"
+                  className="conv-delete"
+                  style={{ opacity: 1, color: "#ff8783" }}
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    deleteNode(node);
+                  }}
+                >
+                  <IconCheck size={12} aria-hidden />
+                </span>
+                <span
+                  data-testid="node-delete-no"
+                  className="conv-delete"
+                  style={{ opacity: 1 }}
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    setConfirmDeletePath(null);
+                  }}
+                >
+                  <IconX size={12} aria-hidden />
+                </span>
+              </>
+            ) : (
+              <>
+                <IconPencil
+                  size={12}
+                  className="conv-delete"
+                  data-testid="node-rename-btn"
+                  aria-hidden
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    startRename(node);
+                  }}
+                />
+                <IconTrash
+                  size={12}
+                  className="conv-delete"
+                  data-testid="node-delete-btn"
+                  aria-hidden
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    deleteNode(node);
+                  }}
+                />
+              </>
+            )}
+          </div>
+        )}
         {node.isDir && node.expanded && node.children && renderTree(node.children, depth + 1)}
+        {pendingCreate && pendingCreate.dir === node.path && renderCreateRow(depth + 1)}
       </div>
     ));
+  }
+
+  function renderCreateRow(depth: number) {
+    if (!pendingCreate) return null;
+    return (
+      <div className="folder-item" style={{ marginLeft: depth * 14 }} data-testid="create-row">
+        <span style={{ width: 12, flexShrink: 0 }} />
+        {pendingCreate.type === "file" ? <IconFile size={14} aria-hidden /> : <IconFolder size={14} aria-hidden />}
+        <input
+          data-testid="create-input"
+          className="form-input"
+          style={{ flex: 1, padding: "2px 6px" }}
+          autoFocus
+          placeholder={pendingCreate.type === "file" ? "file name" : "folder name"}
+          value={createValue}
+          onChange={(e) => setCreateValue(e.currentTarget.value)}
+          onKeyDown={(e) => {
+            if (e.key === "Enter") confirmCreate();
+            if (e.key === "Escape") setPendingCreate(null);
+          }}
+          onBlur={() => confirmCreate()}
+        />
+      </div>
+    );
   }
 
   return (
@@ -246,26 +388,58 @@ function SidebarShell({ conversations, activeConversationId, onSelect, onDelete 
                 <span>No conversations yet</span>
               </div>
             )}
-            {conversations.map((c) => (
-              <div
-                key={c.id}
-                className={`conv${c.id === activeConversationId ? " active" : ""}`}
-                onClick={() => onSelect(c.id)}
-              >
-                <span className="label" title={c.title}>
-                  {c.title || "Untitled"}
-                </span>
-                <IconTrash
-                  size={13}
-                  className="conv-delete"
-                  aria-hidden
-                  onClick={(e) => {
-                    e.stopPropagation();
-                    onDelete(c.id);
-                  }}
-                />
-              </div>
-            ))}
+            {conversations.map((c) =>
+              confirmDeleteId === c.id ? (
+                <div key={c.id} className="conv active" data-testid="conv-delete-confirm">
+                  <span className="label" style={{ color: "#ff8783" }}>
+                    Delete "{c.title || "Untitled"}"?
+                  </span>
+                  <span
+                    data-testid="conv-delete-yes"
+                    className="conv-delete"
+                    style={{ opacity: 1, color: "#ff8783" }}
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      setConfirmDeleteId(null);
+                      onDelete(c.id);
+                    }}
+                  >
+                    <IconCheck size={13} aria-hidden />
+                  </span>
+                  <span
+                    data-testid="conv-delete-no"
+                    className="conv-delete"
+                    style={{ opacity: 1 }}
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      setConfirmDeleteId(null);
+                    }}
+                  >
+                    <IconX size={13} aria-hidden />
+                  </span>
+                </div>
+              ) : (
+                <div
+                  key={c.id}
+                  className={`conv${c.id === activeConversationId ? " active" : ""}`}
+                  onClick={() => onSelect(c.id)}
+                >
+                  <span className="label" title={c.title}>
+                    {c.title || "Untitled"}
+                  </span>
+                  <IconTrash
+                    size={13}
+                    className="conv-delete"
+                    data-testid="conv-delete-btn"
+                    aria-hidden
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      setConfirmDeleteId(c.id);
+                    }}
+                  />
+                </div>
+              ),
+            )}
           </div>
         ) : (
           <div className="folder-list">
@@ -286,10 +460,10 @@ function SidebarShell({ conversations, activeConversationId, onSelect, onDelete 
                   <span className="header-icon-btn" title="Open different folder" onClick={openFolder}>
                     <IconFolderOpen size={14} aria-hidden />
                   </span>
-                  <span className="header-icon-btn" title="New file" onClick={createFile}>
+                  <span className="header-icon-btn" title="New file" onClick={startCreateFile}>
                     <IconFilePlus size={14} aria-hidden />
                   </span>
-                  <span className="header-icon-btn" title="New folder" onClick={createFolder}>
+                  <span className="header-icon-btn" title="New folder" onClick={startCreateFolder}>
                     <IconFolderPlus size={14} aria-hidden />
                   </span>
                   <span className="header-icon-btn" title="Refresh" onClick={refreshTree}>
@@ -306,6 +480,7 @@ function SidebarShell({ conversations, activeConversationId, onSelect, onDelete 
                   <div style={{ color: "#ff8783", fontSize: 11, padding: "2px 6px 6px" }}>{folderError}</div>
                 )}
                 {renderTree(tree, 0)}
+                {pendingCreate && pendingCreate.dir === rootPath && renderCreateRow(0)}
               </>
             )}
           </div>

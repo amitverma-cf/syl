@@ -149,7 +149,10 @@ function AiProvidersTab({
           <input
             type="password"
             value={keyDrafts[p.envVar] ?? ""}
-            onChange={(e) => setKeyDrafts((prev) => ({ ...prev, [p.envVar]: e.currentTarget.value }))}
+            onChange={(e) => {
+              const value = e.currentTarget.value;
+              setKeyDrafts((prev) => ({ ...prev, [p.envVar]: value }));
+            }}
             placeholder={p.configured ? "Key saved — enter to replace" : "API key"}
             className="form-input"
           />

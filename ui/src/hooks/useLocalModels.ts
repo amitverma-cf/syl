@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import type { LocalModelInfo, SystemStats } from "../types";
 
@@ -8,13 +8,13 @@ export function useLocalModels(onError: (message: string) => void) {
   const [localModels, setLocalModels] = useState<LocalModelInfo[]>([]);
   const [stats, setStats] = useState<SystemStats | null>(null);
 
-  function refresh() {
+  const refresh = useCallback(() => {
     invoke<LocalModelInfo[]>("list_local_models")
       .then(setLocalModels)
       .catch((err) => onError(String(err)));
-  }
+  }, [onError]);
 
-  useEffect(refresh, []);
+  useEffect(refresh, [refresh]);
 
   useEffect(() => {
     function poll() {
@@ -26,7 +26,7 @@ export function useLocalModels(onError: (message: string) => void) {
     poll();
     const interval = setInterval(poll, STATS_POLL_INTERVAL_MS);
     return () => clearInterval(interval);
-  }, []);
+  }, [onError, refresh]);
 
   return { localModels, stats, refresh };
 }

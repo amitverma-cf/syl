@@ -347,6 +347,27 @@ pub fn load_local_model(
     Ok(())
 }
 
+/// Real token count for `text` against a specific loaded local model's own
+/// tokenizer — not an approximation. Errors if that model isn't loaded.
+#[tauri::command]
+pub fn count_local_tokens(
+    name: String,
+    text: String,
+    state: tauri::State<'_, LocalModelState>,
+) -> Result<usize, String> {
+    let engine = state
+        .get_loaded(&name)
+        .ok_or_else(|| format!("{name} is not loaded"))?;
+    let guard = crate::sync::lock(&engine);
+    guard.count_tokens(&text).map_err(|e| e.to_string())
+}
+
+/// The context window (in tokens) the local chat engine is configured with.
+#[tauri::command]
+pub fn local_context_size() -> i32 {
+    app_config().local_engine.context_size as i32
+}
+
 #[tauri::command]
 pub fn unload_local_model(
     name: String,

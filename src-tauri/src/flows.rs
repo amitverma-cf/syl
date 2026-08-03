@@ -3,7 +3,7 @@ use std::sync::Mutex;
 
 use core_types::app_config::app_config;
 use core_types::workspace_paths;
-use executor::FlowRunner;
+use executor::{parse_flow, Flow, FlowRunner};
 
 pub fn default_flow_name() -> &'static str {
     &app_config().default_flow_name
@@ -105,4 +105,61 @@ pub fn flow_status(
 #[tauri::command]
 pub fn unload_flow(conversation_id: String, state: tauri::State<'_, FlowState>) {
     crate::sync::lock(&state.runners).remove(&conversation_id);
+}
+
+fn safe_flow_name(name: &str) -> Result<(), String> {
+    if name.is_empty()
+        || name.contains('/')
+        || name.contains('\\')
+        || name.contains("..")
+        || name.contains(std::path::MAIN_SEPARATOR)
+    {
+        return Err(format!("invalid flow name: {name:?}"));
+    }
+    Ok(())
+}
+
+/// Parses and validates a flow definition without touching disk. Used by the
+/// flow editor to check hand-edited or AI-generated JSON before it can be
+/// inserted into the canvas or saved.
+#[tauri::command]
+pub fn validate_flow_json(json: String) -> Result<Flow, String> {
+    parse_flow(json.as_bytes()).map_err(|e| e.to_string())
+}
+
+/// Reads a flow file straight off disk (not tied to any conversation),
+/// for the flow editor to load into the canvas.
+#[tauri::command]
+pub fn get_flow(name: String) -> Result<Flow, String> {
+    safe_flow_name(&name)?;
+    let path = workspace_paths::flows_dir().join(format!("{name}.json"));
+    let bytes = std::fs::read(&path).map_err(|e| e.to_string())?;
+    parse_flow(&bytes).map_err(|e| e.to_string())
+}
+
+/// Validates and writes a flow definition to `.syl/flows/<name>.json`.
+/// Refuses to write anything that doesn't pass the same schema/semantic
+/// validation used when loading a flow into a live conversation.
+#[tauri::command]
+pub fn save_flow(name: String, json: String) -> Result<(), String> {
+    safe_flow_name(&name)?;
+    let flow = parse_flow(json.as_bytes()).map_err(|e| e.to_string())?;
+    if flow.name != name {
+        return Err(format!(
+            "flow name in file ({:?}) does not match save target ({name:?})",
+            flow.name
+        ));
+    }
+    let dir = workspace_paths::flows_dir();
+    std::fs::create_dir_all(&dir).map_err(|e| e.to_string())?;
+    let path = dir.join(format!("{name}.json"));
+    let pretty = serde_json::to_string_pretty(&flow).map_err(|e| e.to_string())?;
+    std::fs::write(&path, pretty).map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+pub fn delete_flow(name: String) -> Result<(), String> {
+    safe_flow_name(&name)?;
+    let path = workspace_paths::flows_dir().join(format!("{name}.json"));
+    std::fs::remove_file(&path).map_err(|e| e.to_string())
 }

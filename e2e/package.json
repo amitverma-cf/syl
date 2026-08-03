@@ -1,0 +1,13 @@
+{
+  "name": "syl-e2e",
+  "private": true,
+  "version": "0.0.0",
+  "type": "commonjs",
+  "scripts": {
+    "test": "mocha"
+  },
+  "devDependencies": {
+    "mocha": "^11.7.4",
+    "selenium-webdriver": "^4.36.0"
+  }
+}

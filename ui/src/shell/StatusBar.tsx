@@ -1,6 +1,7 @@
 import { useState } from "react";
-import { IconCpu, IconDatabase, IconServer, IconFolderCog } from "@tabler/icons-react";
+import { IconCpu, IconDatabase, IconServer, IconFolderCog, IconGauge } from "@tabler/icons-react";
 import { formatBytes, type LocalModelInfo, type SystemStats } from "../types";
+import { useShellStore } from "../store/shellStore";
 
 interface StatusBarProps {
   stats: SystemStats | null;
@@ -9,13 +10,52 @@ interface StatusBarProps {
 
 function StatusBar({ stats, loadedLocalModels }: StatusBarProps) {
   const [open, setOpen] = useState<string | null>(null);
+  const contextUsage = useShellStore((s) => s.contextUsage);
+  const activeTab = useShellStore((s) => s.activeTab);
+  const extraTabs = useShellStore((s) => s.extraTabs);
 
   function toggle(key: string) {
     setOpen((cur) => (cur === key ? null : key));
   }
 
+  const activeUsage = activeTab && !extraTabs[activeTab] ? contextUsage[activeTab] : undefined;
+  const trackedUsage = Object.entries(contextUsage);
+
   return (
     <div className="statusbar" onMouseLeave={() => setOpen(null)}>
+      <div className="sb-wrap">
+        <div className="statusbar-item" onClick={() => toggle("context")} data-testid="statusbar-context">
+          <IconGauge size={12} aria-hidden />
+          {activeUsage
+            ? `${Math.min(100, Math.round((activeUsage.usedTokens / activeUsage.totalTokens) * 100))}% context`
+            : "No active chat"}
+        </div>
+        {open === "context" && (
+          <div className="sb-dropdown open" data-testid="statusbar-context-dropdown">
+            {trackedUsage.length === 0 && (
+              <div className="sb-row">
+                <span>No token usage tracked yet</span>
+              </div>
+            )}
+            {trackedUsage.map(([id, usage]) => (
+              <div key={id} style={{ marginBottom: 6 }}>
+                <div className="sb-row">
+                  <span>{usage.modelLabel}</span>
+                  <span>
+                    {usage.usedTokens.toLocaleString()} / {usage.totalTokens.toLocaleString()}
+                  </span>
+                </div>
+                <div className="sb-mini-bar">
+                  <span style={{ width: `${Math.min(100, (usage.usedTokens / usage.totalTokens) * 100)}%` }} />
+                </div>
+              </div>
+            ))}
+          </div>
+        )}
+      </div>
+
+      <div className="statusbar-divider" />
+
       <div className="sb-wrap">
         <div className="statusbar-item" onClick={() => toggle("models")}>
           <IconServer size={12} aria-hidden />

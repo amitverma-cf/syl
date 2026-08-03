@@ -2,13 +2,19 @@ import { create } from "zustand";
 
 export type Platform = "mac" | "windows" | "linux" | "chromebook";
 export type SidebarTab = "chats" | "folder";
-export type ExtraTabType = "flow" | "text" | "browser";
+export type ExtraTabType = "flow" | "text";
 
 export interface ExtraTab {
   id: string;
   type: ExtraTabType;
   title: string;
   filePath?: string;
+}
+
+export interface ContextUsage {
+  usedTokens: number;
+  totalTokens: number;
+  modelLabel: string;
 }
 
 function detectPlatform(): Platform {
@@ -36,8 +42,6 @@ interface ShellState {
   extraTabs: Record<string, ExtraTab>;
   textDocs: Record<string, string>;
   setTextDoc: (id: string, content: string) => void;
-  browserUrls: Record<string, string>;
-  setBrowserUrl: (id: string, url: string) => void;
   openTabs: string[];
   activeTab: string | null;
   openConversationTab: (id: string) => void;
@@ -57,6 +61,9 @@ interface ShellState {
   settingsPane: string;
   openSettings: (pane?: string) => void;
   closeSettings: () => void;
+
+  contextUsage: Record<string, ContextUsage>;
+  setContextUsage: (conversationId: string, usage: ContextUsage) => void;
 }
 
 export const useShellStore = create<ShellState>((set, get) => ({
@@ -76,8 +83,6 @@ export const useShellStore = create<ShellState>((set, get) => ({
   extraTabs: {},
   textDocs: {},
   setTextDoc: (id, content) => set((s) => ({ textDocs: { ...s.textDocs, [id]: content } })),
-  browserUrls: {},
-  setBrowserUrl: (id, url) => set((s) => ({ browserUrls: { ...s.browserUrls, [id]: url } })),
   openTabs: [],
   activeTab: null,
   openConversationTab: (id) =>
@@ -110,12 +115,10 @@ export const useShellStore = create<ShellState>((set, get) => ({
     const titles: Record<ExtraTabType, string> = {
       flow: "Flow editor",
       text: title ?? "untitled.md",
-      browser: title ?? "New tab",
     };
     set((s) => ({
       extraTabs: { ...s.extraTabs, [id]: { id, type, title: titles[type], filePath } },
       textDocs: type === "text" ? { ...s.textDocs, [id]: content ?? "" } : s.textDocs,
-      browserUrls: type === "browser" ? { ...s.browserUrls, [id]: "" } : s.browserUrls,
       openTabs: [...s.openTabs, id],
       activeTab: id,
     }));
@@ -137,4 +140,8 @@ export const useShellStore = create<ShellState>((set, get) => ({
   settingsPane: "models",
   openSettings: (pane) => set({ settingsOpen: true, settingsPane: pane ?? get().settingsPane }),
   closeSettings: () => set({ settingsOpen: false }),
+
+  contextUsage: {},
+  setContextUsage: (conversationId, usage) =>
+    set((s) => ({ contextUsage: { ...s.contextUsage, [conversationId]: usage } })),
 }));

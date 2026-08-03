@@ -7,21 +7,27 @@ interface MemoryTabProps {
 
 function MemoryTab({ stats, conversations }: MemoryTabProps) {
   return (
-    <div className="flex flex-col gap-2">
-      <h2 className="text-sm font-medium">Memory</h2>
-      <p className="text-xs text-neutral-500">
-        Conversation history and embeddings are stored in a single SQLite database under
-        <span className="font-mono"> .syl/memory/conversations.sqlite</span>.
+    <div>
+      <div className="settings-section-title" style={{ marginTop: 0 }}>
+        Storage
+      </div>
+      <p style={{ fontSize: 11.5, color: "var(--text-3)", margin: "0 0 10px", lineHeight: 1.5 }}>
+        Conversation history and embeddings are stored in a single SQLite database under{" "}
+        <code>.syl/memory/conversations.sqlite</code>.
       </p>
-      <div className="grid grid-cols-2 gap-2 text-sm">
-        <div className="rounded border border-neutral-800 px-3 py-2">
-          <span className="text-xs text-neutral-500">Conversations</span>
-          <p className="font-mono">{conversations.length}</p>
+      <div className="model-row">
+        <div>
+          <div className="name">Conversations</div>
+          <div className="kind">stored in the local database</div>
         </div>
-        <div className="rounded border border-neutral-800 px-3 py-2">
-          <span className="text-xs text-neutral-500">Workspace disk usage</span>
-          <p className="font-mono">{stats ? formatBytes(stats.workspaceDiskBytes) : "—"}</p>
+        <span className="pill">{conversations.length}</span>
+      </div>
+      <div className="model-row">
+        <div>
+          <div className="name">Workspace disk usage</div>
+          <div className="kind">.syl workspace directory</div>
         </div>
+        <span className="pill">{stats ? formatBytes(stats.workspaceDiskBytes) : "—"}</span>
       </div>
     </div>
   );

@@ -365,6 +365,17 @@ body,
 .conv .conv-delete:hover {
   color: #ff8783;
 }
+.folder-item .conv-delete {
+  opacity: 0;
+  color: var(--text-3);
+  flex-shrink: 0;
+}
+.folder-item:hover .conv-delete {
+  opacity: 1;
+}
+.folder-item .conv-delete:hover {
+  color: #ff8783;
+}
 .folder-path {
   font-size: 11px;
   color: var(--text-3);
@@ -466,18 +477,6 @@ body,
 .header-icon-btn:hover {
   background: rgba(255, 255, 255, 0.06);
   color: var(--text-0);
-}
-.header-address {
-  flex: 1;
-  height: 26px;
-  border-radius: 8px;
-  background: rgba(255, 255, 255, 0.04);
-  display: flex;
-  align-items: center;
-  padding: 0 10px;
-  font-size: 12px;
-  color: var(--text-1);
-  margin: 0 6px;
 }
 .main-content {
   flex: 1;
@@ -1235,7 +1234,7 @@ body,
   color: var(--text-1);
 }
 
-/* ---------------- text editor / browser tab ---------------- */
+/* ---------------- text editor ---------------- */
 .text-editor {
   flex: 1;
   width: 100%;
@@ -1248,12 +1247,4 @@ body,
   font-size: 13px;
   line-height: 1.6;
   padding: 16px 18px;
-}
-.browser-preview {
-  flex: 1;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  color: var(--text-3);
-  font-size: 13px;
 }

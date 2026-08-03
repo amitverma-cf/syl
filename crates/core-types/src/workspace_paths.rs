@@ -1,6 +1,14 @@
 use std::path::PathBuf;
 
+/// Root directory for all persisted app state (models, conversations, flows,
+/// registry, logs, etc). Defaults to `<repo>/.syl`, but can be overridden with
+/// `SYL_WORKSPACE_DIR` to point at an isolated directory — used by the E2E
+/// test suite so it never touches a developer's real workspace.
 pub fn workspace_root() -> PathBuf {
+    if let Ok(dir) = std::env::var("SYL_WORKSPACE_DIR") {
+        return PathBuf::from(dir);
+    }
+
     let repo_root = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../..");
     let repo_root = repo_root.canonicalize().unwrap_or(repo_root);
     let repo_root_str = repo_root.to_string_lossy().to_string();

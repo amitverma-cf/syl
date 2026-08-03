@@ -2,8 +2,11 @@
 node_modules
 /ui/node_modules
 /ui/dist
+/ui/coverage
+/e2e/node_modules
 /src-tauri/target
 /local/
 /.syl/
+.*/
 .env*
 !.env.example

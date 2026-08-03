@@ -1,5 +1,6 @@
 import { useEffect, useState } from "react";
 import { invoke } from "@tauri-apps/api/core";
+import { IconTrash } from "@tabler/icons-react";
 import type { CloudModel, ScheduledJob } from "../../types";
 
 interface ScheduledJobsTabProps {
@@ -23,7 +24,7 @@ function ScheduledJobsTab({ cloudModels }: ScheduledJobsTabProps) {
 
   useEffect(refresh, []);
 
-  async function handleAdd(e: React.FormEvent) {
+  async function handleAdd(e: React.SyntheticEvent) {
     e.preventDefault();
     if (!name.trim() || !cronExpr.trim() || !prompt.trim()) return;
     setAdding(true);
@@ -56,31 +57,52 @@ function ScheduledJobsTab({ cloudModels }: ScheduledJobsTabProps) {
   }
 
   return (
-    <div className="flex flex-col gap-2">
-      <h2 className="text-sm font-medium">Scheduled jobs</h2>
-      <p className="text-xs text-neutral-500">
+    <div>
+      <div className="settings-section-title" style={{ marginTop: 0 }}>
+        Scheduled jobs
+      </div>
+      <p style={{ fontSize: 11.5, color: "var(--text-3)", margin: "0 0 10px", lineHeight: 1.5 }}>
         Each job fires an unattended chat turn on a cron schedule — the exact same tool-calling
         loop and flow as a live message, into its own conversation.
       </p>
-      <form onSubmit={handleAdd} className="flex flex-col gap-2">
-        <div className="flex gap-2">
+
+      {jobs.length === 0 && <p style={{ fontSize: 12, color: "var(--text-3)", margin: "0 0 8px" }}>No scheduled jobs yet.</p>}
+      {jobs.map((job) => (
+        <div key={job.id} className="model-row">
+          <div>
+            <div className="name">{job.name}</div>
+            <div className="kind">
+              {job.cronExpr} · {job.model ?? "local"}
+            </div>
+            <div className="kind" style={{ marginTop: 2 }}>
+              {job.prompt}
+            </div>
+          </div>
+          <span className="header-icon-btn" style={{ color: "#ff8783" }} onClick={() => handleRemove(job.id)}>
+            <IconTrash size={14} aria-hidden />
+          </span>
+        </div>
+      ))}
+
+      <div className="settings-section-title">New job</div>
+      <form onSubmit={handleAdd}>
+        <div className="form-row">
           <input
             value={name}
             onChange={(e) => setName(e.currentTarget.value)}
             placeholder="Name (e.g. Morning summary)"
-            className="flex-1 rounded border border-neutral-700 bg-neutral-900 px-2 py-1 text-sm"
+            className="form-input"
           />
           <input
             value={cronExpr}
             onChange={(e) => setCronExpr(e.currentTarget.value)}
             placeholder="Cron expression (6-field)"
-            className="w-48 rounded border border-neutral-700 bg-neutral-900 px-2 py-1 text-sm font-mono"
+            className="form-input"
+            style={{ flex: "0 0 160px", fontFamily: "ui-monospace, monospace" }}
           />
-          <select
-            value={model}
-            onChange={(e) => setModel(e.currentTarget.value)}
-            className="rounded border border-neutral-700 bg-neutral-900 px-2 py-1 text-sm"
-          >
+        </div>
+        <div className="form-row">
+          <select value={model} onChange={(e) => setModel(e.currentTarget.value)} className="form-select">
             <option value="">Local (default)</option>
             {cloudModels.map((m) => (
               <option key={m.id} value={m.id}>
@@ -89,44 +111,21 @@ function ScheduledJobsTab({ cloudModels }: ScheduledJobsTabProps) {
             ))}
           </select>
         </div>
-        <textarea
-          value={prompt}
-          onChange={(e) => setPrompt(e.currentTarget.value)}
-          placeholder="Prompt to send when this job fires"
-          rows={2}
-          className="rounded border border-neutral-700 bg-neutral-900 px-2 py-1 text-sm"
-        />
-        <button
-          type="submit"
-          disabled={adding}
-          className="self-start rounded bg-neutral-100 px-3 py-1 text-xs font-medium text-neutral-950 disabled:opacity-50"
-        >
-          {adding ? "Scheduling..." : "Schedule"}
-        </button>
-      </form>
-
-      {jobs.length === 0 && <p className="text-sm text-neutral-500">No scheduled jobs yet.</p>}
-      {jobs.map((job) => (
-        <div
-          key={job.id}
-          className="flex items-center justify-between rounded border border-neutral-800 px-3 py-2 text-sm"
-        >
-          <div>
-            <span className="font-mono">{job.name}</span>
-            <span className="ml-2 text-xs text-neutral-500">
-              {job.cronExpr} · {job.model ?? "local"}
-            </span>
-            <p className="text-xs text-neutral-500">{job.prompt}</p>
-          </div>
-          <button
-            onClick={() => handleRemove(job.id)}
-            className="rounded border border-neutral-700 px-2 py-1 text-xs text-neutral-400"
-          >
-            Remove
-          </button>
+        <div className="form-row" style={{ alignItems: "flex-start" }}>
+          <textarea
+            value={prompt}
+            onChange={(e) => setPrompt(e.currentTarget.value)}
+            placeholder="Prompt to send when this job fires"
+            rows={2}
+            className="form-input"
+            style={{ resize: "vertical" }}
+          />
         </div>
-      ))}
-      {error && <p className="text-sm text-red-400">{error}</p>}
+        <div className="form-btn" style={{ display: "inline-block", opacity: adding ? 0.6 : 1 }} onClick={handleAdd}>
+          {adding ? "Scheduling…" : "Schedule"}
+        </div>
+      </form>
+      {error && <p className="settings-error">{error}</p>}
     </div>
   );
 }
