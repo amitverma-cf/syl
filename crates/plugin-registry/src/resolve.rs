@@ -56,22 +56,13 @@ pub fn resolve_engine_library_path(
 /// entry) against pointing at an arbitrary file outside the directory it was just
 /// extracted into.
 fn join_contained(base: &Path, relative: &str) -> Result<PathBuf, PluginRegistryError> {
-    let relative_path = Path::new(relative);
-    if relative_path.is_absolute() {
+    if !crate::is_safe_relative_component(relative) {
         return Err(PluginRegistryError::InvalidUrl(format!(
-            "{relative} must be a path relative to the engine's extracted directory"
-        )));
-    }
-    if relative_path
-        .components()
-        .any(|c| matches!(c, std::path::Component::ParentDir))
-    {
-        return Err(PluginRegistryError::InvalidUrl(format!(
-            "{relative} may not contain '..' path segments"
+            "{relative} must be a '..'-free path relative to the engine's extracted directory"
         )));
     }
 
-    let joined = base.join(relative_path);
+    let joined = base.join(relative);
 
     // Canonicalize both sides and re-check containment as defense in depth against a
     // symlink planted inside the extracted archive that a purely lexical check above

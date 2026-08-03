@@ -3,6 +3,7 @@ use std::pin::Pin;
 use std::sync::Arc;
 
 use core_types::app_config::app_config;
+use core_types::workspace_paths;
 use daemon::events::{DaemonEvent, EventBus};
 use daemon::scheduler::CronScheduler;
 use tauri::{AppHandle, Manager};
@@ -59,16 +60,27 @@ pub async fn spawn(app: AppHandle) {
 
 async fn poll_registry(event_bus: Arc<EventBus>) {
     let result = tauri::async_runtime::spawn_blocking(|| {
-        plugin_registry::fetch_remote_registry(&app_config().registry_poll_url)
+        let (engines_json, models_json) =
+            plugin_registry::fetch_remote_registry(&app_config().registry_poll_url)?;
+        // Validate (host-allowlisted URLs, safe library_file paths) and atomically
+        // persist only if the whole fetched pair passes — a poll that fails
+        // validation, or a network/parse error, leaves the last-known-good registry
+        // files exactly as they were, so a compromised or malformed response can
+        // never partially or fully overwrite what's already trusted.
+        plugin_registry::apply_remote_registry(
+            &workspace_paths::registry_dir(),
+            &engines_json,
+            &models_json,
+        )
     })
     .await;
     match result {
-        Ok(Ok(_)) => {
-            tracing::info!("polled the remote plugin registry");
+        Ok(Ok(())) => {
+            tracing::info!("polled and applied the remote plugin registry");
             event_bus.publish(DaemonEvent::RegistryPolled { ok: true });
         }
         Ok(Err(err)) => {
-            tracing::warn!(?err, "failed to poll the remote plugin registry");
+            tracing::warn!(?err, "failed to poll or validate the remote plugin registry");
             event_bus.publish(DaemonEvent::RegistryPolled { ok: false });
         }
         Err(err) => {
