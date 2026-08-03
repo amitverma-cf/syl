@@ -26,7 +26,11 @@ pub fn resolve_engine_library_path(
         .ok_or_else(|| PluginRegistryError::EngineNotFound(engine_id.to_string()))?;
 
     if !engine_entry.download_url.ends_with(".zip") {
-        return resolve_local_path(&engine_entry.download_url, engines_cache_dir);
+        return resolve_local_path(
+            &engine_entry.download_url,
+            engines_cache_dir,
+            engine_entry.sha256.as_deref(),
+        );
     }
 
     let library_file = engine_entry.library_file.as_deref().ok_or_else(|| {
@@ -39,10 +43,42 @@ pub fn resolve_engine_library_path(
         DownloadSource::Local(path) => Ok(path),
         DownloadSource::Remote(url) => {
             let extract_dir = engines_cache_dir.join(&engine_entry.id);
-            download_and_extract_zip(&url, &extract_dir)?;
-            Ok(extract_dir.join(library_file))
+            download_and_extract_zip(&url, &extract_dir, engine_entry.sha256.as_deref())?;
+            join_contained(&extract_dir, library_file)
         }
     }
+}
+
+/// Joins `relative` onto `base`, rejecting anything that would escape `base` — an
+/// absolute path (which `Path::join` would otherwise let silently replace the whole
+/// path) or a `..` component that walks back out of the extraction directory. This
+/// guards `library_file` (and any other archive-relative path taken from a registry
+/// entry) against pointing at an arbitrary file outside the directory it was just
+/// extracted into.
+fn join_contained(base: &Path, relative: &str) -> Result<PathBuf, PluginRegistryError> {
+    if !crate::is_safe_relative_component(relative) {
+        return Err(PluginRegistryError::InvalidUrl(format!(
+            "{relative} must be a '..'-free path relative to the engine's extracted directory"
+        )));
+    }
+
+    let joined = base.join(relative);
+
+    // Canonicalize both sides and re-check containment as defense in depth against a
+    // symlink planted inside the extracted archive that a purely lexical check above
+    // wouldn't catch. The extraction directory must exist by this point (it was just
+    // populated by the zip extraction, or already existed from a prior run).
+    if let (Ok(canonical_base), Ok(canonical_joined)) =
+        (base.canonicalize(), joined.canonicalize())
+    {
+        if !canonical_joined.starts_with(&canonical_base) {
+            return Err(PluginRegistryError::InvalidUrl(format!(
+                "{relative} resolves outside the engine's extracted directory"
+            )));
+        }
+    }
+
+    Ok(joined)
 }
 
 pub fn resolve_model_entry_files(
@@ -50,7 +86,7 @@ pub fn resolve_model_entry_files(
     models_cache_dir: &Path,
 ) -> Result<PathBuf, PluginRegistryError> {
     if entry.extra_files.is_empty() {
-        return resolve_local_path(&entry.download_url, models_cache_dir);
+        return resolve_local_path(&entry.download_url, models_cache_dir, entry.sha256.as_deref());
     }
 
     let model_dir = models_cache_dir.join(&entry.name);
@@ -91,8 +127,16 @@ pub fn resolve_model_for_kind(
             engine: model_entry.required_engine.clone(),
         })?;
 
-    let model_path = resolve_local_path(&model_entry.download_url, models_cache_dir)?;
-    let engine_library_path = resolve_local_path(&engine_entry.download_url, engines_cache_dir)?;
+    let model_path = resolve_local_path(
+        &model_entry.download_url,
+        models_cache_dir,
+        model_entry.sha256.as_deref(),
+    )?;
+    let engine_library_path = resolve_local_path(
+        &engine_entry.download_url,
+        engines_cache_dir,
+        engine_entry.sha256.as_deref(),
+    )?;
 
     Ok(ResolvedModel {
         model_name: model_entry.name,
@@ -100,4 +144,69 @@ pub fn resolve_model_for_kind(
         engine_id: engine_entry.id,
         engine_library_path,
     })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::join_contained;
+    use std::sync::atomic::{AtomicU64, Ordering};
+
+    static COUNTER: AtomicU64 = AtomicU64::new(0);
+
+    fn temp_dir(label: &str) -> std::path::PathBuf {
+        let unique = COUNTER.fetch_add(1, Ordering::SeqCst);
+        let dir = std::env::temp_dir().join(format!(
+            "syl-join-contained-{label}-{}-{unique}",
+            std::process::id()
+        ));
+        std::fs::create_dir_all(&dir).unwrap();
+        dir
+    }
+
+    #[test]
+    fn accepts_a_plain_relative_path_inside_the_base() {
+        let base = temp_dir("ok");
+        std::fs::write(base.join("lib.dll"), b"x").unwrap();
+        let resolved = join_contained(&base, "lib.dll").unwrap();
+        assert_eq!(resolved, base.join("lib.dll"));
+        std::fs::remove_dir_all(&base).unwrap();
+    }
+
+    #[test]
+    fn accepts_a_nested_relative_path_inside_the_base() {
+        let base = temp_dir("nested");
+        std::fs::create_dir_all(base.join("lib")).unwrap();
+        std::fs::write(base.join("lib").join("engine.dll"), b"x").unwrap();
+        let resolved = join_contained(&base, "lib/engine.dll").unwrap();
+        assert_eq!(resolved, base.join("lib").join("engine.dll"));
+        std::fs::remove_dir_all(&base).unwrap();
+    }
+
+    #[test]
+    fn rejects_a_parent_directory_traversal() {
+        let base = temp_dir("traversal");
+        let err = join_contained(&base, "../../../../Windows/Temp/evil.dll").unwrap_err();
+        assert!(matches!(err, crate::PluginRegistryError::InvalidUrl(_)));
+        std::fs::remove_dir_all(&base).unwrap();
+    }
+
+    #[test]
+    fn rejects_an_absolute_path() {
+        let base = temp_dir("absolute");
+        #[cfg(windows)]
+        let absolute = r"C:\Windows\System32\evil.dll";
+        #[cfg(not(windows))]
+        let absolute = "/etc/evil.so";
+        let err = join_contained(&base, absolute).unwrap_err();
+        assert!(matches!(err, crate::PluginRegistryError::InvalidUrl(_)));
+        std::fs::remove_dir_all(&base).unwrap();
+    }
+
+    #[test]
+    fn rejects_a_traversal_hidden_in_the_middle_of_the_path() {
+        let base = temp_dir("mid-traversal");
+        let err = join_contained(&base, "lib/../../evil.dll").unwrap_err();
+        assert!(matches!(err, crate::PluginRegistryError::InvalidUrl(_)));
+        std::fs::remove_dir_all(&base).unwrap();
+    }
 }

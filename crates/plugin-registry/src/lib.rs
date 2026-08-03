@@ -1,6 +1,8 @@
+mod apply;
 mod fetch;
 mod resolve;
 
+pub use apply::apply_remote_registry;
 pub use fetch::{
     download_and_extract_zip, download_to_cache, download_to_dir, fetch_remote_registry, is_cached,
 };
@@ -50,6 +52,8 @@ pub enum PluginRegistryError {
         expected: String,
         actual: String,
     },
+    #[error("rejected remote registry entry {entry}: {reason}")]
+    RejectedRemoteEntry { entry: String, reason: String },
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
@@ -160,10 +164,14 @@ pub fn resolve_download_url(url: &str) -> Result<DownloadSource, PluginRegistryE
     }
 }
 
-pub fn resolve_local_path(url: &str, cache_dir: &Path) -> Result<PathBuf, PluginRegistryError> {
+pub fn resolve_local_path(
+    url: &str,
+    cache_dir: &Path,
+    expected_sha256: Option<&str>,
+) -> Result<PathBuf, PluginRegistryError> {
     match resolve_download_url(url)? {
         DownloadSource::Local(path) => Ok(path),
-        DownloadSource::Remote(url) => download_to_cache(&url, cache_dir),
+        DownloadSource::Remote(url) => download_to_cache(&url, cache_dir, expected_sha256),
     }
 }
 
@@ -190,6 +198,19 @@ pub fn verify_sha256(path: &Path, expected_hex: &str) -> Result<(), PluginRegist
             actual,
         })
     }
+}
+
+/// True if `relative` is safe to join onto a base directory: not absolute, and no
+/// `..` component that could walk back out of it. Shared by `resolve::join_contained`
+/// (an archive's declared `library_file`) and `apply`'s validation of freshly-polled
+/// registry entries, since both are the same "untrusted relative path from a registry
+/// entry" shape.
+pub(crate) fn is_safe_relative_component(relative: &str) -> bool {
+    let path = Path::new(relative);
+    !path.is_absolute()
+        && !path
+            .components()
+            .any(|c| matches!(c, std::path::Component::ParentDir))
 }
 
 fn file_url_path_to_native(raw_path: &str) -> String {

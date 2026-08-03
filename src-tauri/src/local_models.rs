@@ -130,8 +130,12 @@ pub(crate) fn registry_entries() -> Vec<ModelEntry> {
 
 pub(crate) fn kind_for_path(entries: &[ModelEntry], path: &Path) -> Option<ModelKind> {
     entries.iter().find_map(|entry| {
-        let resolved =
-            resolve_local_path(&entry.download_url, &workspace_paths::models_dir()).ok()?;
+        let resolved = resolve_local_path(
+            &entry.download_url,
+            &workspace_paths::models_dir(),
+            entry.sha256.as_deref(),
+        )
+        .ok()?;
         (resolved == path).then_some(entry.kind)
     })
 }
