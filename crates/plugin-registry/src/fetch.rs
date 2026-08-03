@@ -2,15 +2,51 @@ use std::path::{Path, PathBuf};
 
 use crate::PluginRegistryError;
 
-fn cache_file_name(url: &str) -> &str {
-    url.rsplit('/').next().unwrap_or("download")
+/// Derives a safe cache filename from a download URL. Strips query/fragment, splits on
+/// both `/` and `\` (a Windows path separator, which a URL's last segment could still
+/// contain), and rejects anything that isn't a single normal path component (no `..`,
+/// no empty result, no embedded separator) rather than trusting the URL's tail verbatim —
+/// otherwise a crafted `download_url` could smuggle `..` segments into a cache-directory
+/// join and write outside the intended cache directory. Falls back to a content hash of
+/// the URL when the derived name isn't safe, so a download still succeeds under a stable,
+/// collision-resistant name instead of failing outright.
+fn cache_file_name(url: &str) -> String {
+    let without_fragment = url.split('#').next().unwrap_or(url);
+    let without_query = without_fragment.split('?').next().unwrap_or(without_fragment);
+    let candidate = without_query
+        .rsplit(['/', '\\'])
+        .next()
+        .unwrap_or("")
+        .trim();
+
+    let is_safe = !candidate.is_empty()
+        && candidate != "."
+        && candidate != ".."
+        && !candidate.contains('/')
+        && !candidate.contains('\\')
+        && !candidate.contains("..")
+        && !candidate.contains('\0')
+        && !Path::new(candidate).is_absolute();
+
+    if is_safe {
+        candidate.to_string()
+    } else {
+        use sha2::{Digest, Sha256};
+        let mut hasher = Sha256::new();
+        hasher.update(url.as_bytes());
+        format!("download-{:x}", hasher.finalize())
+    }
 }
 
 pub fn is_cached(url: &str, cache_dir: &Path) -> bool {
     cache_dir.join(cache_file_name(url)).exists()
 }
 
-pub fn download_to_cache(url: &str, cache_dir: &Path) -> Result<PathBuf, PluginRegistryError> {
+pub fn download_to_cache(
+    url: &str,
+    cache_dir: &Path,
+    expected_sha256: Option<&str>,
+) -> Result<PathBuf, PluginRegistryError> {
     std::fs::create_dir_all(cache_dir).map_err(|source| PluginRegistryError::Io {
         path: cache_dir.to_path_buf(),
         source,
@@ -31,6 +67,14 @@ pub fn download_to_cache(url: &str, cache_dir: &Path) -> Result<PathBuf, PluginR
         path: dest.clone(),
         source,
     })?;
+    drop(file);
+
+    if let Some(expected) = expected_sha256 {
+        if let Err(err) = crate::verify_sha256(&dest, expected) {
+            let _ = std::fs::remove_file(&dest);
+            return Err(err);
+        }
+    }
 
     Ok(dest)
 }
@@ -60,7 +104,11 @@ pub fn download_to_dir(url: &str, dest_dir: &Path) -> Result<PathBuf, PluginRegi
     Ok(dest)
 }
 
-pub fn download_and_extract_zip(url: &str, extract_dir: &Path) -> Result<(), PluginRegistryError> {
+pub fn download_and_extract_zip(
+    url: &str,
+    extract_dir: &Path,
+    expected_sha256: Option<&str>,
+) -> Result<(), PluginRegistryError> {
     if extract_dir.exists() {
         return Ok(());
     }
@@ -83,6 +131,17 @@ pub fn download_and_extract_zip(url: &str, extract_dir: &Path) -> Result<(), Plu
         source,
     })?;
     drop(file);
+
+    // Verify the downloaded archive itself, before extracting anything from it — a
+    // mismatch here means the zip's contents (including whatever native library it
+    // holds) are not what the registry entry vouches for, so nothing from it should
+    // ever be written out or loaded.
+    if let Some(expected) = expected_sha256 {
+        if let Err(err) = crate::verify_sha256(&zip_path, expected) {
+            let _ = std::fs::remove_dir_all(&staging_dir);
+            return Err(err);
+        }
+    }
 
     let archive_file =
         std::fs::File::open(&zip_path).map_err(|source| PluginRegistryError::Io {
@@ -130,5 +189,67 @@ fn to_error(url: &str, err: ureq::Error) -> PluginRegistryError {
             url: url.to_string(),
             source: std::io::Error::other(transport.to_string()),
         },
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::cache_file_name;
+
+    #[test]
+    fn keeps_a_plain_filename_as_is() {
+        assert_eq!(
+            cache_file_name("https://example.com/models/llama.gguf"),
+            "llama.gguf"
+        );
+    }
+
+    #[test]
+    fn strips_query_and_fragment() {
+        assert_eq!(
+            cache_file_name("https://example.com/models/llama.gguf?token=abc#frag"),
+            "llama.gguf"
+        );
+    }
+
+    #[test]
+    fn splitting_on_backslash_too_defeats_a_windows_style_traversal_tail() {
+        // The original implementation split only on '/', so this whole string (including
+        // the embedded "\..\" segments) was treated as one opaque "filename" and joined
+        // onto the cache dir as-is — a real escape on Windows. Splitting on '\' too means
+        // the traversal segments are discarded the same way forward-slash ones always
+        // were, leaving just the final, safe segment.
+        let url = r"https://example.com/x\..\..\..\Startup\payload.exe";
+        assert_eq!(cache_file_name(url), "payload.exe");
+    }
+
+    #[test]
+    fn falls_back_to_a_hash_when_the_final_segment_is_itself_a_traversal_marker() {
+        let name = cache_file_name("https://example.com/models/..");
+        assert!(!name.contains(".."));
+        assert!(name.starts_with("download-"));
+    }
+
+    #[test]
+    fn a_forward_slash_only_path_already_takes_just_the_last_safe_segment() {
+        // rsplit('/') alone already discards everything before the final segment, so a
+        // pure-forward-slash traversal like this was never actually reachable — the
+        // real gap this module closes is backslash-based traversal (see above), since
+        // the original implementation split only on '/'.
+        assert_eq!(
+            cache_file_name("https://example.com/../../../etc/passwd"),
+            "passwd"
+        );
+    }
+
+    #[test]
+    fn falls_back_to_a_hash_when_the_tail_is_empty() {
+        assert!(cache_file_name("https://example.com/").starts_with("download-"));
+    }
+
+    #[test]
+    fn is_deterministic_for_the_same_url() {
+        let url = "https://example.com/../evil";
+        assert_eq!(cache_file_name(url), cache_file_name(url));
     }
 }

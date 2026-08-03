@@ -23,9 +23,12 @@ fn model_calls_read_file_tool_and_uses_its_real_content() {
         .into_iter()
         .find(|entry| entry.id == "llama-cpp")
         .expect("no llama-cpp engine registered in .syl/registry/engines.json");
-    let engine_library_path =
-        plugin_registry::resolve_local_path(&engine_entry.download_url, &syl_dir.join("engines"))
-            .expect("failed to resolve the llama-cpp engine library path");
+    let engine_library_path = plugin_registry::resolve_local_path(
+        &engine_entry.download_url,
+        &syl_dir.join("engines"),
+        engine_entry.sha256.as_deref(),
+    )
+    .expect("failed to resolve the llama-cpp engine library path");
 
     let model_path = syl_dir.join("models").join("Qwen3.5-2B-Q4_K_M.gguf");
     assert!(

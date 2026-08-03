@@ -52,7 +52,7 @@ fn seed_flows() {
 
 fn seed_engine(entry: EngineEntry) -> Option<EngineEntry> {
     let dest_dir = workspace_paths::engines_dir().join(&entry.id);
-    let dest_path = seed_into(&entry.download_url, &dest_dir)?;
+    let dest_path = seed_into(&entry.download_url, &dest_dir, entry.sha256.as_deref())?;
     Some(EngineEntry {
         download_url: file_url(&dest_path),
         ..entry
@@ -61,21 +61,23 @@ fn seed_engine(entry: EngineEntry) -> Option<EngineEntry> {
 
 fn seed_model(entry: ModelEntry) -> Option<ModelEntry> {
     let dest_dir = workspace_paths::models_dir();
-    let dest_path = seed_into(&entry.download_url, &dest_dir)?;
+    let dest_path = seed_into(&entry.download_url, &dest_dir, entry.sha256.as_deref())?;
     Some(ModelEntry {
         download_url: file_url(&dest_path),
         ..entry
     })
 }
 
-fn seed_into(download_url: &str, dest_dir: &Path) -> Option<PathBuf> {
+fn seed_into(download_url: &str, dest_dir: &Path, expected_sha256: Option<&str>) -> Option<PathBuf> {
     match plugin_registry::resolve_download_url(download_url) {
         Ok(DownloadSource::Local(source_path)) => {
             let source_dir = source_path.parent()?;
             copy_dir_files(source_dir, dest_dir).ok()?;
             Some(dest_dir.join(source_path.file_name()?))
         }
-        Ok(DownloadSource::Remote(url)) => plugin_registry::download_to_cache(&url, dest_dir).ok(),
+        Ok(DownloadSource::Remote(url)) => {
+            plugin_registry::download_to_cache(&url, dest_dir, expected_sha256).ok()
+        }
         Err(err) => {
             tracing::warn!(?err, url = %download_url, "skipping seed, source not resolvable");
             None

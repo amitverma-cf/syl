@@ -40,7 +40,7 @@ fn resolve_local_path_returns_local_file_directly() {
     let url = format!("file://{}", tmp.to_string_lossy().replace('\\', "/"));
     let cache_dir = std::env::temp_dir().join("syl-plugin-registry-cache-unused");
 
-    let resolved = resolve_local_path(&url, &cache_dir).unwrap();
+    let resolved = resolve_local_path(&url, &cache_dir, None).unwrap();
     assert_eq!(resolved, tmp);
     std::fs::remove_file(&tmp).unwrap();
 }

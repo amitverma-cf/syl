@@ -160,10 +160,14 @@ pub fn resolve_download_url(url: &str) -> Result<DownloadSource, PluginRegistryE
     }
 }
 
-pub fn resolve_local_path(url: &str, cache_dir: &Path) -> Result<PathBuf, PluginRegistryError> {
+pub fn resolve_local_path(
+    url: &str,
+    cache_dir: &Path,
+    expected_sha256: Option<&str>,
+) -> Result<PathBuf, PluginRegistryError> {
     match resolve_download_url(url)? {
         DownloadSource::Local(path) => Ok(path),
-        DownloadSource::Remote(url) => download_to_cache(&url, cache_dir),
+        DownloadSource::Remote(url) => download_to_cache(&url, cache_dir, expected_sha256),
     }
 }
 
