@@ -14,3 +14,5 @@ export { default as Overlay } from "./Overlay";
 export type { OverlayProps } from "./Overlay";
 export { default as NavItem } from "./NavItem";
 export type { NavItemProps } from "./NavItem";
+export { default as DropdownMenu } from "./DropdownMenu";
+export type { DropdownMenuProps, DropdownMenuGroup, DropdownMenuItem } from "./DropdownMenu";

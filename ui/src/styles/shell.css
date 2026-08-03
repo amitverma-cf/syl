@@ -734,6 +734,8 @@ body,
   bottom: calc(100% + 6px);
   right: 0;
   min-width: 180px;
+  max-height: 320px;
+  overflow-y: auto;
   background: var(--bg-2);
   border-radius: var(--radius-md);
   padding: 4px;

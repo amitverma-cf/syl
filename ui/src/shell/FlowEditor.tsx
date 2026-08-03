@@ -2,7 +2,7 @@ import { useEffect, useMemo, useState } from "react";
 import { useAutoGrowTextarea } from "../hooks/useAutoGrowTextarea";
 import { invoke } from "@tauri-apps/api/core";
 import { toast } from "sonner";
-import { IconButton, Button, Input, Textarea, Select } from "../components/ui";
+import { IconButton, Button, Input, Textarea, Select, DropdownMenu, type DropdownMenuGroup } from "../components/ui";
 import {
   IconPlus,
   IconTrash,
@@ -305,26 +305,32 @@ function FlowEditor({ cloudModels, providers, localModels }: FlowEditorProps) {
           <IconPlus size={13} aria-hidden />
           Add state
         </Button>
-        <div className="dropdown-wrap">
-          <Button
-            data-testid="flow-load-btn"
-            onClick={() => setLoadMenuOpen((v) => !v)}
-            style={{ display: "flex", alignItems: "center", gap: 4 }}
-          >
-            <IconFolderOpen size={13} aria-hidden />
-            Load
-          </Button>
-          {loadMenuOpen && (
-            <div className="option-menu open" style={{ right: "auto", left: 0 }} onMouseLeave={() => setLoadMenuOpen(false)}>
-              {availableFlows.length === 0 && <div className="cmdk-empty">No saved flows yet</div>}
-              {availableFlows.map((name) => (
-                <div key={name} className="option-item" data-flow-name={name} onClick={() => handleLoad(name)}>
-                  {name}
-                </div>
-              ))}
-            </div>
-          )}
-        </div>
+        <DropdownMenu
+          open={loadMenuOpen}
+          onOpenChange={setLoadMenuOpen}
+          menuStyle={{ right: "auto", left: 0 }}
+          emptyLabel="No saved flows yet"
+          trigger={
+            <Button
+              data-testid="flow-load-btn"
+              onClick={() => setLoadMenuOpen((v) => !v)}
+              style={{ display: "flex", alignItems: "center", gap: 4 }}
+            >
+              <IconFolderOpen size={13} aria-hidden />
+              Load
+            </Button>
+          }
+          groups={[
+            {
+              items: availableFlows.map((name) => ({
+                key: name,
+                label: name,
+                onSelect: () => handleLoad(name),
+                attrs: { "data-flow-name": name },
+              })),
+            },
+          ]}
+        />
         <Button data-testid="flow-new-btn" onClick={handleNew} style={{ display: "flex", alignItems: "center", gap: 4 }}>
           <IconFileText size={13} aria-hidden />
           New
@@ -576,48 +582,37 @@ function FlowEditor({ cloudModels, providers, localModels }: FlowEditorProps) {
             <IconSparkles size={14} aria-hidden style={{ color: "var(--accent)" }} />
             <span style={{ fontSize: 11, color: "var(--text-3)" }}>Generate with AI</span>
             <div className="spacer" />
-            <div className="dropdown-wrap">
-              <div className="dropdown" onClick={() => setAiModelMenuOpen((v) => !v)}>
-                <span>{aiModelLabel}</span>
-                <IconChevronDown size={12} aria-hidden />
-              </div>
-              {aiModelMenuOpen && (
-                <div className="option-menu open" onMouseLeave={() => setAiModelMenuOpen(false)}>
-                  {chatLocalModels.map((m) => (
-                    <div
-                      key={m.name}
-                      className={`option-item${aiModel === `${LOCAL_MODEL_PREFIX}${m.name}` ? " sel" : ""}`}
-                      onClick={() => {
-                        setAiModel(`${LOCAL_MODEL_PREFIX}${m.name}`);
-                        setAiModelMenuOpen(false);
-                      }}
-                    >
-                      {m.name}
-                      <span className="option-sub">{m.loaded ? "loaded" : ""}</span>
-                    </div>
-                  ))}
-                  {Array.from(cloudGroups.entries()).map(([provider, models]) => (
-                    <div key={provider}>
-                      <div className="cmdk-group-label" style={{ padding: "4px 8px" }}>
-                        {provider.toUpperCase()}
-                      </div>
-                      {models.map((m) => (
-                        <div
-                          key={m.id}
-                          className={`option-item${aiModel === m.id ? " sel" : ""}`}
-                          onClick={() => {
-                            setAiModel(m.id);
-                            setAiModelMenuOpen(false);
-                          }}
-                        >
-                          {m.label}
-                        </div>
-                      ))}
-                    </div>
-                  ))}
+            <DropdownMenu
+              open={aiModelMenuOpen}
+              onOpenChange={setAiModelMenuOpen}
+              trigger={
+                <div className="dropdown" onClick={() => setAiModelMenuOpen((v) => !v)}>
+                  <span>{aiModelLabel}</span>
+                  <IconChevronDown size={12} aria-hidden />
                 </div>
-              )}
-            </div>
+              }
+              groups={[
+                {
+                  label: chatLocalModels.length > 0 ? "LOCAL" : undefined,
+                  items: chatLocalModels.map((m) => ({
+                    key: m.name,
+                    label: m.name,
+                    sublabel: m.loaded ? "loaded" : undefined,
+                    selected: aiModel === `${LOCAL_MODEL_PREFIX}${m.name}`,
+                    onSelect: () => setAiModel(`${LOCAL_MODEL_PREFIX}${m.name}`),
+                  })),
+                },
+                ...Array.from(cloudGroups.entries()).map(([provider, models]): DropdownMenuGroup => ({
+                  label: provider.toUpperCase(),
+                  items: models.map((m) => ({
+                    key: m.id,
+                    label: m.label,
+                    selected: aiModel === m.id,
+                    onSelect: () => setAiModel(m.id),
+                  })),
+                })),
+              ]}
+            />
             <div
               data-testid="flow-ai-send"
               className={`send${!aiPrompt.trim() || aiBusy || !aiModel ? " disabled" : ""}`}
