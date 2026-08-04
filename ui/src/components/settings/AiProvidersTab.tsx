@@ -1,7 +1,7 @@
 import { useState } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import { toast } from "sonner";
-import { IconDownload, IconTrash } from "@tabler/icons-react";
+import { IconDownload, IconTrash, IconPencil } from "@tabler/icons-react";
 import { Button, IconButton, Input, Badge } from "../ui";
 import {
   formatBytes,
@@ -40,6 +40,13 @@ function AiProvidersTab({
   const [newProviderKey, setNewProviderKey] = useState("");
   const [addingProvider, setAddingProvider] = useState(false);
 
+  const [editingProvider, setEditingProvider] = useState<string | null>(null);
+  const [editBaseUrl, setEditBaseUrl] = useState("");
+  const [editApiKey, setEditApiKey] = useState("");
+  const [savingEdit, setSavingEdit] = useState(false);
+  const [removingProvider, setRemovingProvider] = useState<string | null>(null);
+
+  const [deletingKey, setDeletingKey] = useState<string | null>(null);
   const [deletingModel, setDeletingModel] = useState<string | null>(null);
   const [downloadingModel, setDownloadingModel] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -59,6 +66,22 @@ function AiProvidersTab({
       toast.error(String(err));
     } finally {
       setSavingProvider(null);
+    }
+  }
+
+  async function handleDeleteKey(envVar: string) {
+    if (!confirm(`Delete the saved ${envVar} key? This can't be undone.`)) return;
+    setDeletingKey(envVar);
+    setError(null);
+    try {
+      await invoke("delete_provider_api_key", { envVar });
+      refreshProviders();
+      toast.success(`${envVar} deleted`);
+    } catch (err) {
+      setError(String(err));
+      toast.error(String(err));
+    } finally {
+      setDeletingKey(null);
     }
   }
 
@@ -83,6 +106,50 @@ function AiProvidersTab({
       toast.error(String(err));
     } finally {
       setAddingProvider(false);
+    }
+  }
+
+  function startEditingProvider(p: CustomProviderConfig) {
+    setEditingProvider(p.name);
+    setEditBaseUrl(p.baseUrl);
+    setEditApiKey("");
+  }
+
+  async function handleSaveEditedProvider(e: React.FormEvent) {
+    e.preventDefault();
+    if (!editingProvider || !editBaseUrl.trim()) return;
+    setSavingEdit(true);
+    setError(null);
+    try {
+      await invoke("update_custom_provider", {
+        name: editingProvider,
+        baseUrl: editBaseUrl.trim(),
+        apiKey: editApiKey.trim() || null,
+      });
+      setEditingProvider(null);
+      refreshCustomProviders();
+      toast.success(`Provider ${editingProvider} updated`);
+    } catch (err) {
+      setError(String(err));
+      toast.error(String(err));
+    } finally {
+      setSavingEdit(false);
+    }
+  }
+
+  async function handleRemoveCustomProvider(name: string) {
+    if (!confirm(`Remove provider ${name} and its stored API key? This can't be undone.`)) return;
+    setRemovingProvider(name);
+    setError(null);
+    try {
+      await invoke("remove_custom_provider", { name });
+      refreshCustomProviders();
+      toast.success(`Provider ${name} removed`);
+    } catch (err) {
+      setError(String(err));
+      toast.error(String(err));
+    } finally {
+      setRemovingProvider(null);
     }
   }
 
@@ -160,6 +227,16 @@ function AiProvidersTab({
             Save
           </Button>
           {p.configured && <Badge>configured</Badge>}
+          {p.configured && (
+            <IconButton
+              icon={IconTrash}
+              iconSize={14}
+              variant="danger"
+              title="Delete key"
+              onClick={() => deletingKey !== p.envVar && handleDeleteKey(p.envVar)}
+              style={{ opacity: deletingKey === p.envVar ? 0.5 : 1 }}
+            />
+          )}
         </div>
       ))}
 
@@ -169,16 +246,58 @@ function AiProvidersTab({
           No custom providers yet.
         </p>
       )}
-      {customProviders.map((p) => (
-        <div key={p.name} className="model-row">
-          <div>
-            <div className="name">{p.name}</div>
-            <div className="kind">
-              {p.baseUrl} · {p.models.length} models
+      {customProviders.map((p) =>
+        editingProvider === p.name ? (
+          <form key={p.name} onSubmit={handleSaveEditedProvider} className="form-row">
+            <span style={{ width: 110, flexShrink: 0, fontSize: 12, color: "rgba(255,255,255,.7)" }}>
+              {p.name}
+            </span>
+            <Input
+              value={editBaseUrl}
+              onChange={(e) => setEditBaseUrl(e.currentTarget.value)}
+              placeholder="Base URL"
+            />
+            <Input
+              type="password"
+              value={editApiKey}
+              onChange={(e) => setEditApiKey(e.currentTarget.value)}
+              placeholder="API key (leave blank to keep current)"
+              style={{ flex: "0 0 140px" }}
+            />
+            <Button type="submit" disabled={savingEdit}>
+              {savingEdit ? "Saving…" : "Save"}
+            </Button>
+            <Button type="button" onClick={() => setEditingProvider(null)}>
+              Cancel
+            </Button>
+          </form>
+        ) : (
+          <div key={p.name} className="model-row">
+            <div>
+              <div className="name">{p.name}</div>
+              <div className="kind">
+                {p.baseUrl} · {p.models.length} models
+              </div>
+            </div>
+            <div style={{ display: "flex", alignItems: "center", gap: 6, flexShrink: 0 }}>
+              <IconButton
+                icon={IconPencil}
+                iconSize={14}
+                title="Edit"
+                onClick={() => startEditingProvider(p)}
+              />
+              <IconButton
+                icon={IconTrash}
+                iconSize={14}
+                variant="danger"
+                title="Remove"
+                onClick={() => removingProvider !== p.name && handleRemoveCustomProvider(p.name)}
+                style={{ opacity: removingProvider === p.name ? 0.5 : 1 }}
+              />
             </div>
           </div>
-        </div>
-      ))}
+        ),
+      )}
       <form onSubmit={handleAddCustomProvider} className="form-row">
         <Input
           value={newProviderName}

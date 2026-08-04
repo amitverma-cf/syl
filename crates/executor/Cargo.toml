@@ -9,6 +9,7 @@ core-types.workspace = true
 jsonschema.workspace = true
 serde.workspace = true
 serde_json.workspace = true
+simd-json = "0.13"
 thiserror.workspace = true
 
 [dev-dependencies]

@@ -10,7 +10,9 @@
     ],
     "defaultFlowName": "default",
     "registryPollUrl": "https://raw.githubusercontent.com/amitverma-cf/syl/main/registry",
+    "registryAllowedHosts": ["github.com", "huggingface.co"],
     "maxToolIterations": 8,
+    "contextBudgetChars": 12000,
     "localEngine": {
         "id": "llama-cpp",
         "contextSize": 2048,

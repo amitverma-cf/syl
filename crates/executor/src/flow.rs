@@ -7,6 +7,8 @@ pub enum FlowError {
     SchemaViolation(String),
     #[error("flow file is not valid JSON: {0}")]
     Json(#[from] serde_json::Error),
+    #[error("flow file is not valid JSON: {0}")]
+    SimdJson(#[from] simd_json::Error),
     #[error("initial_state {0:?} does not match any state name")]
     UnknownInitialState(String),
     #[error("state {state:?} has a duplicate name")]
@@ -120,7 +122,10 @@ fn validate_semantics(flow: &Flow) -> Result<(), FlowError> {
 }
 
 pub fn parse_flow(json_bytes: &[u8]) -> Result<Flow, FlowError> {
-    let value: Value = serde_json::from_slice(json_bytes)?;
+    // simd-json parses in place and needs a mutable, owned buffer — flow files
+    // are small, so the copy is cheap relative to the SIMD parse it buys.
+    let mut owned_bytes = json_bytes.to_vec();
+    let value: Value = simd_json::from_slice(&mut owned_bytes)?;
 
     let validator = jsonschema::validator_for(&schema())
         .expect("flow schema is a static, valid JSON Schema document");

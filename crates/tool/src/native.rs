@@ -35,7 +35,39 @@ fn resolve_within_root(root: &Path, rel: &str) -> Result<PathBuf, ToolError> {
             "path escapes the workspace root: {rel}"
         )));
     }
+    reject_symlink_escape(&normalized_root, &normalized, rel)?;
     Ok(normalized)
+}
+
+/// Defense-in-depth against a symlink somewhere inside the workspace root pointing
+/// outside it — the lexical check above only catches `..`/absolute components in the
+/// *requested* path, not a symlinked directory that makes an innocuous-looking relative
+/// path resolve elsewhere on disk. Canonicalizes the longest *existing* prefix of the
+/// target path (walking up until something on disk is found — the target file itself
+/// may not exist yet, e.g. for `write_file`) and re-checks containment against the
+/// canonicalized root.
+fn reject_symlink_escape(root: &Path, target: &Path, rel: &str) -> Result<(), ToolError> {
+    let Ok(canonical_root) = root.canonicalize() else {
+        // Root doesn't exist yet (e.g. a fresh workspace) — nothing to canonicalize
+        // against, and the lexical check already ran.
+        return Ok(());
+    };
+
+    let mut existing_prefix = target;
+    loop {
+        if let Ok(canonical) = existing_prefix.canonicalize() {
+            if !canonical.starts_with(&canonical_root) {
+                return Err(ToolError::InvalidArgs(format!(
+                    "path escapes the workspace root: {rel}"
+                )));
+            }
+            return Ok(());
+        }
+        match existing_prefix.parent() {
+            Some(parent) => existing_prefix = parent,
+            None => return Ok(()),
+        }
+    }
 }
 
 fn require_str_arg<'a>(args: &'a Value, key: &str) -> Result<&'a str, ToolError> {

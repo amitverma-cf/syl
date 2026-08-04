@@ -1,8 +1,3 @@
-export type GenerationEvent =
-  | { type: "piece"; text: string }
-  | { type: "done" }
-  | { type: "error"; message: string };
-
 export interface StoredMessage {
   role: string;
   content: string;
@@ -85,6 +80,11 @@ export interface ToolSpec {
   name: string;
   description: string;
   inputSchema: unknown;
+}
+
+export interface ToolPermissionEntry {
+  toolName: string;
+  decision: "Allow" | "Deny";
 }
 
 export interface LocalModelInfo {

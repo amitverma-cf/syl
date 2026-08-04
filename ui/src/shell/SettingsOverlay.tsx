@@ -5,6 +5,7 @@ import {
   IconBrain,
   IconClock,
   IconTopologyStar3,
+  IconSettings2,
   IconX,
 } from "@tabler/icons-react";
 import { useShellStore } from "../store/shellStore";
@@ -25,8 +26,10 @@ import MemoryTab from "../components/settings/MemoryTab";
 import ToolsTab from "../components/settings/ToolsTab";
 import ScheduledJobsTab from "../components/settings/ScheduledJobsTab";
 import FlowTemplatesTab from "../components/settings/FlowTemplatesTab";
+import GeneralTab from "../components/settings/GeneralTab";
 
 const PANES = [
+  { key: "general", label: "General", icon: IconSettings2 },
   { key: "models", label: "AI Providers & Models", icon: IconBox },
   { key: "mcp", label: "MCP Servers", icon: IconPlug },
   { key: "memory", label: "Memory", icon: IconBrain },
@@ -81,6 +84,7 @@ function SettingsOverlay(props: SettingsOverlayProps) {
             <IconButton icon={IconX} onClick={closeSettings} aria-label="Close settings" />
           </div>
           <div className="settings-body">
+            {settingsPane === "general" && <GeneralTab />}
             {settingsPane === "models" && (
               <AiProvidersTab
                 providers={props.providers}
@@ -99,7 +103,7 @@ function SettingsOverlay(props: SettingsOverlayProps) {
             {settingsPane === "memory" && (
               <MemoryTab stats={props.stats} conversations={props.conversations} />
             )}
-            {settingsPane === "tools" && <ToolsTab />}
+            {settingsPane === "tools" && <ToolsTab activeConversationId={props.activeConversationId} />}
             {settingsPane === "jobs" && <ScheduledJobsTab cloudModels={props.cloudModels} />}
             {settingsPane === "flows" && (
               <FlowTemplatesTab activeConversationId={props.activeConversationId} />

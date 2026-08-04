@@ -5,6 +5,7 @@ const { By } = require("selenium-webdriver");
 const { launchApp } = require("../helpers/app");
 
 const PANES = [
+  { key: "General" },
   { key: "AI Providers & Models" },
   { key: "MCP Servers" },
   { key: "Memory" },
@@ -53,7 +54,7 @@ describe("settings overlay", function () {
 
   it("shows empty states for a workspace with no local models and no configured providers", async function () {
     const navItems = await driver.findElements(By.css(".settings-nav-item"));
-    await navItems[0].click();
+    await navItems[1].click();
     await driver.sleep(100);
     const body = await driver.findElement(By.css(".settings-body"));
     const text = await body.getText();

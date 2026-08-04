@@ -12,3 +12,11 @@ serde_json.workspace = true
 thiserror.workspace = true
 async-trait = "0.1"
 rmcp.workspace = true
+
+[dev-dependencies]
+# Extra features (server-side streamable HTTP) only needed to run a real, local,
+# in-repo MCP server fixture in tests/http_fixture_server.rs — never used by
+# production code, which only ever acts as an MCP *client*.
+rmcp = { workspace = true, features = ["server", "transport-streamable-http-server"] }
+hyper-util = { version = "0.1", features = ["tokio", "server", "server-auto", "service"] }
+http = "1"

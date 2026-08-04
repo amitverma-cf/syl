@@ -13,8 +13,10 @@ mod observability;
 mod permission;
 mod providers;
 mod scheduled_jobs;
+mod settings;
 mod speech;
 mod sync;
+mod updater;
 
 use std::sync::Arc;
 
@@ -54,6 +56,7 @@ pub fn run() {
         .plugin(tauri_plugin_opener::init())
         .plugin(tauri_plugin_fs::init())
         .plugin(tauri_plugin_dialog::init())
+        .plugin(tauri_plugin_updater::Builder::new().build())
         .plugin(tauri_plugin_autostart::init(
             MacosLauncher::LaunchAgent,
             None,
@@ -68,6 +71,8 @@ pub fn run() {
             }
         })
         .setup(move |app| {
+            settings::apply_autostart(&app.handle().clone(), settings::load_settings().autostart);
+
             let prompter = Arc::new(TauriPermissionPrompter::new(app.handle().clone()));
 
             let workspace_root = workspace_paths::workspace_root().join("workspace");
@@ -94,6 +99,7 @@ pub fn run() {
             app.manage(observability_state);
 
             app.manage(flows::FlowState::default());
+            app.manage(flows::WorkspaceFolderState::default());
             app.manage(local_models::LocalModelState::default());
             app.manage(images::SdModelState::default());
             app.manage(embeddings::OnnxModelState::default());
@@ -136,6 +142,8 @@ pub fn run() {
             commands::call_tool,
             commands::list_tools,
             commands::respond_permission,
+            commands::list_tool_permissions,
+            commands::clear_tool_permission,
             models::list_available_models,
             models::download_model,
             local_models::list_local_models,
@@ -168,15 +176,22 @@ pub fn run() {
             flows::validate_flow_json,
             providers::list_providers,
             providers::set_provider_api_key,
+            providers::delete_provider_api_key,
             providers::list_cloud_models,
             providers::list_custom_providers,
             providers::add_custom_provider,
+            providers::update_custom_provider,
+            providers::remove_custom_provider,
             mcp::list_mcp_servers,
             mcp::add_mcp_server,
             mcp::remove_mcp_server,
             scheduled_jobs::list_scheduled_jobs,
             scheduled_jobs::add_scheduled_job,
             scheduled_jobs::remove_scheduled_job,
+            updater::check_for_update,
+            updater::install_update,
+            settings::get_settings,
+            settings::update_settings,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

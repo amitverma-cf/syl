@@ -47,3 +47,19 @@ async fn publish_with_no_subscribers_does_not_panic() {
         state: "greeting".to_string(),
     });
 }
+
+#[test]
+fn daemon_event_round_trips_through_rkyv_bytes() {
+    let event = DaemonEvent::ScheduledJobFired {
+        job: "nightly-summary".to_string(),
+        ok: true,
+    };
+
+    let bytes = rkyv::to_bytes::<rkyv::rancor::Error>(&event).unwrap();
+    let archived =
+        rkyv::access::<rkyv::Archived<DaemonEvent>, rkyv::rancor::Error>(&bytes).unwrap();
+    let deserialized: DaemonEvent =
+        rkyv::deserialize::<DaemonEvent, rkyv::rancor::Error>(archived).unwrap();
+
+    assert_eq!(deserialized, event);
+}

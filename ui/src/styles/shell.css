@@ -1354,6 +1354,10 @@ body,
   flex-shrink: 0;
   display: inline-block;
 }
+.ui-badge-deny {
+  background: rgba(255, 135, 131, 0.16);
+  color: #ff8783;
+}
 
 .ui-overlay {
   position: fixed;

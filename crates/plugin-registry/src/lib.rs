@@ -1,14 +1,18 @@
 mod apply;
 mod fetch;
 mod resolve;
+mod signing;
 
-pub use apply::apply_remote_registry;
+pub use apply::{apply_remote_registry, RegistrySignatures};
 pub use fetch::{
-    download_and_extract_zip, download_to_cache, download_to_dir, fetch_remote_registry, is_cached,
+    download_and_extract_zip, download_to_cache, download_to_dir, fetch_remote_registry,
+    fetch_remote_registry_conditional, is_cached, read_etag, write_etag, ConditionalFetch,
+    RegistryPollResult,
 };
 pub use resolve::{
     resolve_engine_library_path, resolve_model_entry_files, resolve_model_for_kind, ResolvedModel,
 };
+pub use signing::verify_registry_signature;
 
 use std::path::{Path, PathBuf};
 
@@ -54,6 +58,8 @@ pub enum PluginRegistryError {
     },
     #[error("rejected remote registry entry {entry}: {reason}")]
     RejectedRemoteEntry { entry: String, reason: String },
+    #[error("registry manifest signature verification failed for {file}: {reason}")]
+    InvalidSignature { file: String, reason: String },
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]

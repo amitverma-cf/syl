@@ -1,6 +1,6 @@
 use std::path::Path;
 
-use crate::keys::set_api_key;
+use crate::keys::{delete_api_key, set_api_key};
 
 #[derive(Debug, thiserror::Error)]
 pub enum CustomProviderError {
@@ -88,6 +88,38 @@ pub fn add_custom_provider(
     save_custom_providers(providers_path, &providers)?;
 
     Ok(config)
+}
+
+/// Removes a custom provider and its stored API key, if any. A no-op (not an
+/// error) if no provider with that name exists — mirrors the MCP server
+/// remove path's idempotent-remove behavior.
+pub fn remove_custom_provider(
+    providers_path: &Path,
+    env_path: &Path,
+    name: &str,
+) -> Result<(), CustomProviderError> {
+    let mut providers = load_custom_providers(providers_path);
+    let Some(index) = providers.iter().position(|p| p.name == name) else {
+        return Ok(());
+    };
+    let env_var = providers[index].env_var.clone();
+    providers.remove(index);
+    save_custom_providers(providers_path, &providers)?;
+    delete_api_key(env_path, &env_var)?;
+    Ok(())
+}
+
+/// Re-runs the real `GET {base_url}/models` discovery call and replaces the
+/// existing provider config with the result — same underlying logic as
+/// `add_custom_provider`, which already overwrites a same-named entry.
+pub fn update_custom_provider(
+    providers_path: &Path,
+    env_path: &Path,
+    name: &str,
+    base_url: &str,
+    api_key: Option<&str>,
+) -> Result<CustomProviderConfig, CustomProviderError> {
+    add_custom_provider(providers_path, env_path, name, base_url, api_key)
 }
 
 fn fetch_models(base_url: &str, api_key: Option<&str>) -> Result<Vec<String>, CustomProviderError> {

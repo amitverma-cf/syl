@@ -68,8 +68,7 @@ fn join_contained(base: &Path, relative: &str) -> Result<PathBuf, PluginRegistry
     // symlink planted inside the extracted archive that a purely lexical check above
     // wouldn't catch. The extraction directory must exist by this point (it was just
     // populated by the zip extraction, or already existed from a prior run).
-    if let (Ok(canonical_base), Ok(canonical_joined)) =
-        (base.canonicalize(), joined.canonicalize())
+    if let (Ok(canonical_base), Ok(canonical_joined)) = (base.canonicalize(), joined.canonicalize())
     {
         if !canonical_joined.starts_with(&canonical_base) {
             return Err(PluginRegistryError::InvalidUrl(format!(
@@ -86,7 +85,11 @@ pub fn resolve_model_entry_files(
     models_cache_dir: &Path,
 ) -> Result<PathBuf, PluginRegistryError> {
     if entry.extra_files.is_empty() {
-        return resolve_local_path(&entry.download_url, models_cache_dir, entry.sha256.as_deref());
+        return resolve_local_path(
+            &entry.download_url,
+            models_cache_dir,
+            entry.sha256.as_deref(),
+        );
     }
 
     let model_dir = models_cache_dir.join(&entry.name);

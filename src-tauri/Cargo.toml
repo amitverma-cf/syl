@@ -18,6 +18,7 @@ tauri = { version = "2", features = ["tray-icon"] }
 tauri-plugin-opener = "2"
 tauri-plugin-fs = "2"
 tauri-plugin-dialog = "2"
+tauri-plugin-updater = "2"
 serde.workspace = true
 serde_json.workspace = true
 core-types.workspace = true
@@ -28,6 +29,7 @@ tool.workspace = true
 executor.workspace = true
 daemon.workspace = true
 plugin-registry.workspace = true
+extension-host.workspace = true
 tracing.workspace = true
 tracing-subscriber.workspace = true
 tracing-appender.workspace = true
@@ -39,3 +41,6 @@ tokio-cron-scheduler.workspace = true
 uuid.workspace = true
 base64.workspace = true
 cpal.workspace = true
+
+[dev-dependencies]
+tokio = { version = "1", features = ["test-util"] }

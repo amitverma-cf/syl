@@ -40,12 +40,12 @@ describe("SettingsOverlay", () => {
     expect(container).toBeEmptyDOMElement();
   });
 
-  it("shows all six nav panes with the current pane marked active", () => {
+  it("shows all seven nav panes with the current pane marked active", () => {
     useShellStore.setState({ settingsOpen: true, settingsPane: "mcp" });
     const { container } = render(<SettingsOverlay {...baseProps} />);
 
     const navItems = container.querySelectorAll(".settings-nav-item");
-    expect(navItems).toHaveLength(6);
+    expect(navItems).toHaveLength(7);
     const active = container.querySelector(".settings-nav-item.active");
     expect(active).toHaveTextContent("MCP Servers");
   });
@@ -91,6 +91,6 @@ describe("SettingsOverlay", () => {
   it("falls back to the first pane if settingsPane holds an unrecognized value", () => {
     useShellStore.setState({ settingsOpen: true, settingsPane: "not-a-real-pane" });
     render(<SettingsOverlay {...baseProps} />);
-    expect(screen.getByRole("heading", { name: "AI Providers & Models" })).toBeInTheDocument();
+    expect(screen.getByRole("heading", { name: "General" })).toBeInTheDocument();
   });
 });

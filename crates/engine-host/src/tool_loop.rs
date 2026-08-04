@@ -45,7 +45,12 @@ pub fn generate_with_tools(
     ))
 }
 
-fn tool_catalog_prompt(tools: &[tool::ToolSpec]) -> String {
+/// Backend-agnostic (no `LlamaEngine` dependency) — reused directly by the
+/// extension-process-based tool loop in `src-tauri` for the same reason it's
+/// used here: building the tool-catalog preamble and parsing a tool call out
+/// of generated text doesn't care whether the text came from an in-process
+/// engine or an isolated extension process.
+pub fn tool_catalog_prompt(tools: &[tool::ToolSpec]) -> String {
     if tools.is_empty() {
         return String::new();
     }
@@ -66,7 +71,7 @@ fn tool_catalog_prompt(tools: &[tool::ToolSpec]) -> String {
     out
 }
 
-fn extract_tool_call(text: &str) -> Option<(String, Value)> {
+pub fn extract_tool_call(text: &str) -> Option<(String, Value)> {
     const START_MARKER: &str = "```tool_call";
     let start = text.find(START_MARKER)? + START_MARKER.len();
     let rest = &text[start..];

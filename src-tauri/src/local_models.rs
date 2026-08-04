@@ -4,22 +4,63 @@ use std::sync::{Arc, Mutex};
 
 use core_types::app_config::app_config;
 use core_types::workspace_paths;
-use engine_host::llama::LlamaEngine;
+use extension_host::{ExtensionBackend, ExtensionManifest, ExtensionProcess};
 use plugin_registry::{resolve_local_path, ModelEntry, ModelKind};
 
 #[derive(Default)]
 pub struct LocalModelState {
-    loaded: Mutex<HashMap<String, Arc<Mutex<LlamaEngine>>>>,
+    loaded: Mutex<HashMap<String, Arc<ExtensionProcess>>>,
 }
 
 impl LocalModelState {
-    pub fn get_loaded(&self, name: &str) -> Option<Arc<Mutex<LlamaEngine>>> {
+    pub fn get_loaded(&self, name: &str) -> Option<Arc<ExtensionProcess>> {
         crate::sync::lock(&self.loaded).get(name).cloned()
     }
 
-    pub fn any_loaded(&self) -> Option<Arc<Mutex<LlamaEngine>>> {
+    pub fn any_loaded(&self) -> Option<Arc<ExtensionProcess>> {
         crate::sync::lock(&self.loaded).values().next().cloned()
     }
+}
+
+/// Resolves the `engine-worker` binary's path next to the running app's own
+/// executable — works in dev (`cargo build` puts both binaries in the same
+/// `target/debug`/`target/release` directory) and, once packaged, for a
+/// Tauri sidecar (`bundle.externalBin`), which is likewise placed alongside
+/// the main executable. See the extension-ecosystem plan's packaging note.
+pub(crate) fn resolve_engine_worker_binary_path() -> Result<PathBuf, String> {
+    let current_exe = std::env::current_exe().map_err(|e| e.to_string())?;
+    let dir = current_exe
+        .parent()
+        .ok_or_else(|| "current executable has no parent directory".to_string())?;
+    Ok(dir.join(format!("engine-worker{}", std::env::consts::EXE_SUFFIX)))
+}
+
+/// The `llama-cpp-chat` extension's own manifest declares `provides`/
+/// `requires` and its backend command (the `engine-worker` binary), but not
+/// which `.gguf` model to load — that's chosen per-load by the user, not a
+/// property of the extension itself. This builds a real per-load manifest
+/// from the installed extension's declared backend, appending the concrete
+/// `--library`/`--model`/`--n-ctx` args for this specific load.
+pub(crate) fn build_chat_extension_manifest(
+    model_path: &Path,
+    engine_library_path: &Path,
+    n_ctx: u32,
+) -> Result<ExtensionManifest, String> {
+    let mut manifest = extension_host::find_extension("llama-cpp-chat").ok_or_else(|| {
+        "the llama-cpp-chat extension is not installed under .syl/extensions/".to_string()
+    })?;
+    manifest.backend = ExtensionBackend {
+        command: manifest.backend.command,
+        args: vec![
+            "--library".to_string(),
+            engine_library_path.display().to_string(),
+            "--model".to_string(),
+            model_path.display().to_string(),
+            "--n-ctx".to_string(),
+            n_ctx.to_string(),
+        ],
+    };
+    Ok(manifest)
 }
 
 #[derive(Clone, serde::Serialize)]
@@ -300,12 +341,21 @@ pub fn set_local_model_kind(name: String, kind: ModelKind) -> Result<(), String>
 }
 
 #[tauri::command]
-pub fn load_local_model(
+pub async fn load_local_model(
     name: String,
     state: tauri::State<'_, LocalModelState>,
 ) -> Result<(), String> {
     if crate::sync::lock(&state.loaded).contains_key(&name) {
         return Ok(());
+    }
+
+    let max_concurrent = crate::settings::load_settings().max_concurrent_local_models;
+    let currently_loaded = crate::sync::lock(&state.loaded).len() as u32;
+    if currently_loaded >= max_concurrent {
+        return Err(format!(
+            "already at the configured limit of {max_concurrent} concurrently loaded local \
+             model(s); unload one first or raise the limit in Settings"
+        ));
     }
 
     let entries = registry_entries();
@@ -339,31 +389,36 @@ pub fn load_local_model(
     )
     .map_err(|e| e.to_string())?;
 
-    let engine = LlamaEngine::load(
-        &engine_library_path,
+    let manifest = build_chat_extension_manifest(
         &model_path,
+        &engine_library_path,
         local_engine_config.context_size,
-        false,
-    )
-    .map_err(|e| e.to_string())?;
+    )?;
 
-    crate::sync::lock(&state.loaded).insert(name, Arc::new(Mutex::new(engine)));
+    // The model now loads in its own isolated `engine-worker` process — if
+    // llama.cpp segfaults or panics across its FFI boundary, only that
+    // process dies; the host observes a clean crash error instead of going
+    // down with it (see `extension_host::ExtensionProcess`).
+    let process = ExtensionProcess::spawn(manifest)
+        .await
+        .map_err(|e| e.to_string())?;
+
+    crate::sync::lock(&state.loaded).insert(name, Arc::new(process));
     Ok(())
 }
 
 /// Real token count for `text` against a specific loaded local model's own
 /// tokenizer — not an approximation. Errors if that model isn't loaded.
 #[tauri::command]
-pub fn count_local_tokens(
+pub async fn count_local_tokens(
     name: String,
     text: String,
     state: tauri::State<'_, LocalModelState>,
 ) -> Result<usize, String> {
-    let engine = state
+    let process = state
         .get_loaded(&name)
         .ok_or_else(|| format!("{name} is not loaded"))?;
-    let guard = crate::sync::lock(&engine);
-    guard.count_tokens(&text).map_err(|e| e.to_string())
+    process.count_tokens(&text).await.map_err(|e| e.to_string())
 }
 
 /// The context window (in tokens) the local chat engine is configured with.
@@ -373,14 +428,15 @@ pub fn local_context_size() -> i32 {
 }
 
 #[tauri::command]
-pub fn unload_local_model(
+pub async fn unload_local_model(
     name: String,
     state: tauri::State<'_, LocalModelState>,
 ) -> Result<(), String> {
-    crate::sync::lock(&state.loaded)
+    let process = crate::sync::lock(&state.loaded)
         .remove(&name)
-        .map(|_| ())
-        .ok_or_else(|| format!("{name} is not loaded"))
+        .ok_or_else(|| format!("{name} is not loaded"))?;
+    process.kill().await;
+    Ok(())
 }
 
 #[tauri::command]
@@ -440,4 +496,73 @@ pub fn delete_local_model(
         .collect();
     let json = serde_json::to_string_pretty(&remaining).map_err(|e| e.to_string())?;
     std::fs::write(&local_models_file, json).map_err(|e| e.to_string())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn temp_model_file(label: &str) -> PathBuf {
+        static COUNTER: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+        let unique = COUNTER.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+        let path = std::env::temp_dir().join(format!(
+            "syl-local-models-test-{label}-{}-{unique}.gguf",
+            std::process::id()
+        ));
+        std::fs::write(&path, b"fake gguf contents").unwrap();
+        path
+    }
+
+    fn file_url(path: &Path) -> String {
+        format!("file://{}", path.to_string_lossy().replace('\\', "/"))
+    }
+
+    fn entry(name: &str, kind: ModelKind, download_url: String) -> ModelEntry {
+        ModelEntry {
+            name: name.to_string(),
+            kind,
+            size_bytes: 0,
+            quantization: "Q4_K_M".to_string(),
+            required_engine: "llama-cpp".to_string(),
+            download_url,
+            sha256: None,
+            extra_files: Vec::new(),
+        }
+    }
+
+    #[test]
+    fn kind_for_path_finds_the_entry_whose_resolved_download_matches() {
+        let chat_file = temp_model_file("chat");
+        let embed_file = temp_model_file("embed");
+        let entries = vec![
+            entry("chat-model", ModelKind::Chat, file_url(&chat_file)),
+            entry("embed-model", ModelKind::Embedding, file_url(&embed_file)),
+        ];
+
+        assert_eq!(kind_for_path(&entries, &chat_file), Some(ModelKind::Chat));
+        assert_eq!(
+            kind_for_path(&entries, &embed_file),
+            Some(ModelKind::Embedding)
+        );
+
+        std::fs::remove_file(&chat_file).ok();
+        std::fs::remove_file(&embed_file).ok();
+    }
+
+    #[test]
+    fn kind_for_path_returns_none_for_a_path_not_in_the_registry() {
+        let chat_file = temp_model_file("unregistered-chat");
+        let entries = vec![entry("chat-model", ModelKind::Chat, file_url(&chat_file))];
+
+        let unrelated = std::env::temp_dir().join("some-other-file.gguf");
+        assert_eq!(kind_for_path(&entries, &unrelated), None);
+
+        std::fs::remove_file(&chat_file).ok();
+    }
+
+    #[test]
+    fn kind_for_path_returns_none_for_an_empty_registry() {
+        let path = std::env::temp_dir().join("anything.gguf");
+        assert_eq!(kind_for_path(&[], &path), None);
+    }
 }

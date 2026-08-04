@@ -14,11 +14,10 @@ import {
   IconArrowUp,
   IconChevronDown,
 } from "@tabler/icons-react";
-import { Button, DropdownMenu, type DropdownMenuGroup } from "./ui";
+import { Button, DropdownMenu, Input, type DropdownMenuGroup } from "./ui";
 import type {
   CloudModel,
   FlowStateInfo,
-  GenerationEvent,
   LocalModelInfo,
   PermissionRequest,
   ProviderInfo,
@@ -29,6 +28,16 @@ import { useShellStore } from "../store/shellStore";
 import { cloudContextWindow, countTokens, localContextSize } from "../lib/tokens";
 
 const LOCAL_MODEL_PREFIX = "local::";
+
+// Wire tags for the raw-byte generation event channel — must match
+// src-tauri/src/commands.rs's GENERATION_EVENT_TAG_* constants. Sent as raw
+// bytes (a one-byte tag + UTF-8 payload) instead of a per-piece JSON envelope,
+// since pieces are by far the highest-frequency message on this channel.
+const GENERATION_EVENT_TAG_PIECE = 0;
+const GENERATION_EVENT_TAG_DONE = 1;
+const GENERATION_EVENT_TAG_ERROR = 2;
+
+const textDecoder = new TextDecoder();
 
 interface ChatPanelProps {
   conversationId: string;
@@ -70,9 +79,20 @@ function ChatPanel({
   const [error, setError] = useState<string | null>(null);
   const [selectedModelOverride, setSelectedModel] = useState<string | null>(null);
   const [modelMenuOpen, setModelMenuOpen] = useState(false);
+  const [customModelInputOpen, setCustomModelInputOpen] = useState(false);
+  const [customModelIdDraft, setCustomModelIdDraft] = useState("");
   const [activeFlow, setActiveFlow] = useState<FlowStateInfo | null>(null);
   const [permissionRequest, setPermissionRequest] = useState<PermissionRequest | null>(null);
   const transcriptRef = useRef<HTMLDivElement>(null);
+
+  const pendingPieceRef = useRef("");
+  const rafIdRef = useRef<number | null>(null);
+  useEffect(
+    () => () => {
+      if (rafIdRef.current !== null) cancelAnimationFrame(rafIdRef.current);
+    },
+    [],
+  );
 
   const [isGeneratingImage, setIsGeneratingImage] = useState(false);
   const [isRecording, setIsRecording] = useState(false);
@@ -129,6 +149,20 @@ function ChatPanel({
     };
   }, []);
 
+  useEffect(() => {
+    const unlisten = listen<number>("tool-permission-timeout", (event) => {
+      setPermissionRequest((current) =>
+        current?.requestId === event.payload ? null : current,
+      );
+      toast.error("Permission request timed out and was denied", {
+        description: "No answer was given in time.",
+      });
+    });
+    return () => {
+      unlisten.then((fn) => fn());
+    };
+  }, []);
+
   async function respondToPermission(response: "allowOnce" | "allowAlways" | "deny" | "denyAlways") {
     if (!permissionRequest) return;
     try {
@@ -148,7 +182,7 @@ function ChatPanel({
   const selectedLocalModelLoaded = selectedLocalModelInfo?.loaded ?? false;
   const selectedModelLabel = isLocalModel
     ? selectedLocalModelName
-    : cloudModels.find((m) => m.id === selectedModel)?.label ?? "Select a model";
+    : cloudModels.find((m) => m.id === selectedModel)?.label || selectedModel || "Select a model";
 
   const [tokenCounts, setTokenCounts] = useState<number[]>([]);
   const setContextUsage = useShellStore((s) => s.setContextUsage);
@@ -186,6 +220,13 @@ function ChatPanel({
     } finally {
       setIsLoadingModel(false);
     }
+  }
+
+  function submitCustomModelId() {
+    const id = customModelIdDraft.trim();
+    if (id) setSelectedModel(id);
+    setCustomModelIdDraft("");
+    setCustomModelInputOpen(false);
   }
 
   async function unloadSelectedLocalModel() {
@@ -226,24 +267,54 @@ function ChatPanel({
       { role: "assistant", content: "", createdAt: Date.now() / 1000 },
     ]);
 
-    const channel = new Channel<GenerationEvent>();
-    channel.onmessage = (event) => {
-      if (event.type === "piece") {
-        setMessages((prev) => {
-          const next = [...prev];
-          const last = next[next.length - 1];
-          next[next.length - 1] = { ...last, content: last.content + event.text };
-          return next;
-        });
-      } else if (event.type === "done") {
+    function flushPendingPiece() {
+      if (!pendingPieceRef.current) return;
+      const text = pendingPieceRef.current;
+      pendingPieceRef.current = "";
+      setMessages((prev) => {
+        const next = [...prev];
+        const last = next[next.length - 1];
+        next[next.length - 1] = { ...last, content: last.content + text };
+        return next;
+      });
+    }
+
+    function cancelScheduledFlush() {
+      if (rafIdRef.current !== null) {
+        cancelAnimationFrame(rafIdRef.current);
+        rafIdRef.current = null;
+      }
+    }
+
+    const channel = new Channel<ArrayBuffer>();
+    channel.onmessage = (raw) => {
+      const bytes = new Uint8Array(raw);
+      const tag = bytes[0];
+      if (tag === GENERATION_EVENT_TAG_PIECE) {
+        // Buffer pieces and flush to React state at most once per animation
+        // frame instead of on every IPC message — a fast local model can
+        // emit far more tokens per second than the display can render.
+        pendingPieceRef.current += textDecoder.decode(bytes.subarray(1));
+        if (rafIdRef.current === null) {
+          rafIdRef.current = requestAnimationFrame(() => {
+            rafIdRef.current = null;
+            flushPendingPiece();
+          });
+        }
+      } else if (tag === GENERATION_EVENT_TAG_DONE) {
+        cancelScheduledFlush();
+        flushPendingPiece();
         setIsGenerating(false);
         invoke<FlowStateInfo | null>("flow_status", { conversationId })
           .then(setActiveFlow)
           .catch((err) => setError(String(err)));
         onTurnComplete();
-      } else if (event.type === "error") {
-        setError(event.message);
-        toast.error(event.message);
+      } else if (tag === GENERATION_EVENT_TAG_ERROR) {
+        cancelScheduledFlush();
+        flushPendingPiece();
+        const message = textDecoder.decode(bytes.subarray(1));
+        setError(message);
+        toast.error(message);
         setIsGenerating(false);
       }
     };
@@ -425,6 +496,16 @@ function ChatPanel({
           <span>No chat model set up yet — download one from Settings.</span>
         </div>
       )}
+      {isGenerating && (
+        <div
+          data-testid="generation-status"
+          style={{ padding: "0 18px", fontSize: 11.5, color: permissionRequest ? "#e3b341" : "var(--text-3)" }}
+        >
+          {permissionRequest
+            ? "Waiting for your answer to the permission request above…"
+            : "Generating…"}
+        </div>
+      )}
 
       <div className="composer-wrap">
         <form className="composer" onSubmit={handleSubmit}>
@@ -475,41 +556,82 @@ function ChatPanel({
               </Button>
             )}
 
-            <DropdownMenu
-              open={modelMenuOpen}
-              onOpenChange={setModelMenuOpen}
-              trigger={
-                <div className="dropdown" onClick={() => setModelMenuOpen((v) => !v)}>
-                  <span>{selectedModelLabel}</span>
-                  <IconChevronDown size={13} aria-hidden />
-                </div>
-              }
-              groups={[
-                ...(chatLocalModels.length > 0
-                  ? [
-                      {
-                        label: "LOCAL",
-                        items: chatLocalModels.map((m) => ({
-                          key: m.name,
-                          label: m.name,
-                          sublabel: m.loaded ? "loaded" : undefined,
-                          selected: selectedModel === `${LOCAL_MODEL_PREFIX}${m.name}`,
-                          onSelect: () => setSelectedModel(`${LOCAL_MODEL_PREFIX}${m.name}`),
-                        })),
-                      },
-                    ]
-                  : []),
-                ...Array.from(cloudGroups.entries()).map(([provider, models]): DropdownMenuGroup => ({
-                  label: provider.toUpperCase(),
-                  items: models.map((m) => ({
-                    key: m.id,
-                    label: m.label,
-                    selected: selectedModel === m.id,
-                    onSelect: () => setSelectedModel(m.id),
+            {customModelInputOpen ? (
+              <form
+                onSubmit={(e) => {
+                  e.preventDefault();
+                  submitCustomModelId();
+                }}
+                style={{ display: "flex", alignItems: "center", gap: 4 }}
+              >
+                <Input
+                  autoFocus
+                  placeholder="provider/model-id"
+                  value={customModelIdDraft}
+                  onChange={(e) => setCustomModelIdDraft(e.target.value)}
+                  onKeyDown={(e) => {
+                    if (e.key === "Escape") {
+                      setCustomModelIdDraft("");
+                      setCustomModelInputOpen(false);
+                    }
+                  }}
+                  onBlur={() => {
+                    if (!customModelIdDraft.trim()) setCustomModelInputOpen(false);
+                  }}
+                  style={{ width: 160, fontSize: 11 }}
+                />
+                <Button type="submit" style={{ fontSize: 11 }}>
+                  Use
+                </Button>
+              </form>
+            ) : (
+              <DropdownMenu
+                open={modelMenuOpen}
+                onOpenChange={setModelMenuOpen}
+                trigger={
+                  <div className="dropdown" onClick={() => setModelMenuOpen((v) => !v)}>
+                    <span>{selectedModelLabel}</span>
+                    <IconChevronDown size={13} aria-hidden />
+                  </div>
+                }
+                groups={[
+                  ...(chatLocalModels.length > 0
+                    ? [
+                        {
+                          label: "LOCAL",
+                          items: chatLocalModels.map((m) => ({
+                            key: m.name,
+                            label: m.name,
+                            sublabel: m.loaded ? "loaded" : undefined,
+                            selected: selectedModel === `${LOCAL_MODEL_PREFIX}${m.name}`,
+                            onSelect: () => setSelectedModel(`${LOCAL_MODEL_PREFIX}${m.name}`),
+                          })),
+                        },
+                      ]
+                    : []),
+                  ...Array.from(cloudGroups.entries()).map(([provider, models]): DropdownMenuGroup => ({
+                    label: provider.toUpperCase(),
+                    items: models.map((m) => ({
+                      key: m.id,
+                      label: m.label,
+                      selected: selectedModel === m.id,
+                      onSelect: () => setSelectedModel(m.id),
+                    })),
                   })),
-                })),
-              ]}
-            />
+                  {
+                    label: "OTHER",
+                    items: [
+                      {
+                        key: "custom-model-id",
+                        label: "Other model ID…",
+                        onSelect: () => setCustomModelInputOpen(true),
+                        attrs: { "data-testid": "custom-model-id-item" },
+                      },
+                    ],
+                  },
+                ]}
+              />
+            )}
 
             <div
               className={`send${!prompt.trim() || isGenerating || isLoadingModel || !selectedModel ? " disabled" : ""}`}
