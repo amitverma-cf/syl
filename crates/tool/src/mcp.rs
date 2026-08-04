@@ -64,10 +64,28 @@ pub struct McpToolBridge {
     client: std::sync::Arc<RunningService<RoleClient, ()>>,
 }
 
+/// An explicit handle to shut a connected MCP server's transport down, independent of
+/// how many `McpToolBridge`s (one per tool) share the underlying `RunningService`.
+/// Cancelling this — rather than only relying on the last `Arc<RunningService>` clone
+/// being dropped once every bridge is unregistered — makes disconnect deterministic
+/// and immediate: it directly triggers `rmcp`'s service-loop shutdown, which for the
+/// stdio transport actually kills the child process (`TokioChildProcess`'s own drop
+/// cleanup), rather than leaving that to happen "eventually" whenever the last
+/// reference elsewhere happens to go out of scope.
+pub struct McpConnectionHandle {
+    cancellation: rmcp::service::RunningServiceCancellationToken,
+}
+
+impl McpConnectionHandle {
+    pub fn disconnect(self) {
+        self.cancellation.cancel();
+    }
+}
+
 impl McpToolBridge {
     pub async fn connect(
         config: &McpServerConfig,
-    ) -> Result<(Vec<Self>, Vec<McpToolDescriptor>), ToolError> {
+    ) -> Result<(Vec<Self>, Vec<McpToolDescriptor>, McpConnectionHandle), ToolError> {
         let client: RunningService<RoleClient, ()> = match &config.transport {
             McpTransportConfig::Stdio { command, args } => {
                 let transport = TokioChildProcess::new(
@@ -89,6 +107,9 @@ impl McpToolBridge {
                     ToolError::Execution(format!("failed to connect to MCP server: {e}"))
                 })?
             }
+        };
+        let connection_handle = McpConnectionHandle {
+            cancellation: client.cancellation_token(),
         };
         let client = std::sync::Arc::new(client);
 
@@ -121,7 +142,7 @@ impl McpToolBridge {
             })
             .collect();
 
-        Ok((bridges, descriptors))
+        Ok((bridges, descriptors, connection_handle))
     }
 }
 

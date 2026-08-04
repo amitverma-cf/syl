@@ -3,13 +3,21 @@ use std::sync::Mutex;
 
 use core_types::workspace_paths;
 use tauri::Manager;
-use tool::{McpServerConfig, McpToolBridge, McpToolDescriptor, McpTransportConfig, Tool};
+use tool::{
+    McpConnectionHandle, McpServerConfig, McpToolBridge, McpToolDescriptor, McpTransportConfig,
+    Tool,
+};
 
 use crate::ToolState;
 
+struct ConnectedServer {
+    tool_names: Vec<String>,
+    handle: McpConnectionHandle,
+}
+
 #[derive(Default)]
 pub struct McpState {
-    server_tool_names: Mutex<HashMap<String, Vec<String>>>,
+    connections: Mutex<HashMap<String, ConnectedServer>>,
 }
 
 #[tauri::command]
@@ -28,7 +36,7 @@ pub async fn add_mcp_server(
         name: name.clone(),
         transport,
     };
-    let (bridges, descriptors) = McpToolBridge::connect(&config)
+    let (bridges, descriptors, handle) = McpToolBridge::connect(&config)
         .await
         .map_err(|e| e.to_string())?;
 
@@ -36,7 +44,8 @@ pub async fn add_mcp_server(
     for bridge in bridges {
         tool_state.executor.register(std::sync::Arc::new(bridge));
     }
-    crate::sync::lock(&mcp_state.server_tool_names).insert(name.clone(), tool_names);
+    crate::sync::lock(&mcp_state.connections)
+        .insert(name.clone(), ConnectedServer { tool_names, handle });
 
     let path = workspace_paths::mcp_servers_file();
     let mut servers = tool::load_mcp_servers(&path);
@@ -53,10 +62,15 @@ pub fn remove_mcp_server(
     tool_state: tauri::State<'_, ToolState>,
     mcp_state: tauri::State<'_, McpState>,
 ) -> Result<(), String> {
-    if let Some(tool_names) = crate::sync::lock(&mcp_state.server_tool_names).remove(&name) {
-        for tool_name in tool_names {
-            tool_state.executor.unregister(&tool_name);
+    if let Some(connected) = crate::sync::lock(&mcp_state.connections).remove(&name) {
+        for tool_name in &connected.tool_names {
+            tool_state.executor.unregister(tool_name);
         }
+        // Explicitly cancel the transport rather than only relying on the last
+        // Arc<RunningService> clone being dropped once every bridge above is
+        // unregistered — deterministic, immediate shutdown (and a real child-process
+        // kill for the stdio transport) instead of "eventually, whenever".
+        connected.handle.disconnect();
     }
 
     let path = workspace_paths::mcp_servers_file();
@@ -74,7 +88,7 @@ pub fn reconnect_saved_servers(app: &tauri::AppHandle) {
     tauri::async_runtime::spawn(async move {
         for config in servers {
             match McpToolBridge::connect(&config).await {
-                Ok((bridges, _descriptors)) => {
+                Ok((bridges, _descriptors, handle)) => {
                     let tool_state = app.state::<ToolState>();
                     let mcp_state = app.state::<McpState>();
                     let tool_names: Vec<String> =
@@ -82,8 +96,8 @@ pub fn reconnect_saved_servers(app: &tauri::AppHandle) {
                     for bridge in bridges {
                         tool_state.executor.register(std::sync::Arc::new(bridge));
                     }
-                    crate::sync::lock(&mcp_state.server_tool_names)
-                        .insert(config.name.clone(), tool_names);
+                    crate::sync::lock(&mcp_state.connections)
+                        .insert(config.name.clone(), ConnectedServer { tool_names, handle });
                     tracing::info!(server = %config.name, "reconnected saved MCP server");
                 }
                 Err(err) => {
