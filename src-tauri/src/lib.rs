@@ -13,6 +13,7 @@ mod observability;
 mod permission;
 mod providers;
 mod scheduled_jobs;
+mod settings;
 mod speech;
 mod sync;
 mod updater;
@@ -70,6 +71,8 @@ pub fn run() {
             }
         })
         .setup(move |app| {
+            settings::apply_autostart(&app.handle().clone(), settings::load_settings().autostart);
+
             let prompter = Arc::new(TauriPermissionPrompter::new(app.handle().clone()));
 
             let workspace_root = workspace_paths::workspace_root().join("workspace");
@@ -187,6 +190,8 @@ pub fn run() {
             scheduled_jobs::remove_scheduled_job,
             updater::check_for_update,
             updater::install_update,
+            settings::get_settings,
+            settings::update_settings,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

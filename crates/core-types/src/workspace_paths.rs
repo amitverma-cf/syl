@@ -93,6 +93,14 @@ pub fn scheduled_jobs_file() -> PathBuf {
     workspace_root().join("scheduled_jobs.json")
 }
 
+/// Genuinely user-adjustable app settings (autostart, resource limits,
+/// telemetry opt-in/out) — distinct from `config/app.json`, which is
+/// committed, build-time, repo-level config the app ships with and never
+/// writes back to.
+pub fn settings_file() -> PathBuf {
+    workspace_root().join("settings.json")
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -141,6 +149,7 @@ mod tests {
         assert!(custom_providers_file().starts_with(&root));
         assert!(mcp_servers_file().starts_with(&root));
         assert!(scheduled_jobs_file().starts_with(&root));
+        assert!(settings_file().starts_with(&root));
         unsafe {
             std::env::remove_var("SYL_WORKSPACE_DIR");
         }

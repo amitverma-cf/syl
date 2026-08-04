@@ -308,6 +308,15 @@ pub fn load_local_model(
         return Ok(());
     }
 
+    let max_concurrent = crate::settings::load_settings().max_concurrent_local_models;
+    let currently_loaded = crate::sync::lock(&state.loaded).len() as u32;
+    if currently_loaded >= max_concurrent {
+        return Err(format!(
+            "already at the configured limit of {max_concurrent} concurrently loaded local \
+             model(s); unload one first or raise the limit in Settings"
+        ));
+    }
+
     let entries = registry_entries();
     let (_, model_path, _) = discover_gguf_models()
         .into_iter()
