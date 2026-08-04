@@ -101,6 +101,13 @@ pub fn settings_file() -> PathBuf {
     workspace_root().join("settings.json")
 }
 
+/// Where installed extensions live, one subdirectory per extension id:
+/// `.syl/extensions/<id>/manifest.json` plus whatever backend binary/assets
+/// that extension ships alongside its manifest.
+pub fn extensions_dir() -> PathBuf {
+    workspace_root().join("extensions")
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -150,6 +157,7 @@ mod tests {
         assert!(mcp_servers_file().starts_with(&root));
         assert!(scheduled_jobs_file().starts_with(&root));
         assert!(settings_file().starts_with(&root));
+        assert!(extensions_dir().starts_with(&root));
         unsafe {
             std::env::remove_var("SYL_WORKSPACE_DIR");
         }

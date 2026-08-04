@@ -9,6 +9,8 @@ members = [
     "crates/executor",
     "crates/daemon",
     "crates/plugin-registry",
+    "crates/extension-host",
+    "crates/engine-worker",
     "src-tauri",
 ]
 
@@ -27,6 +29,7 @@ tool = { path = "crates/tool" }
 executor = { path = "crates/executor" }
 daemon = { path = "crates/daemon" }
 plugin-registry = { path = "crates/plugin-registry" }
+extension-host = { path = "crates/extension-host" }
 
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"

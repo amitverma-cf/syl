@@ -43,7 +43,8 @@
         "installMode": "currentUser"
       }
     },
-    "createUpdaterArtifacts": true
+    "createUpdaterArtifacts": true,
+    "externalBin": ["binaries/engine-worker"]
   },
   "plugins": {
     "updater": {

@@ -4,22 +4,63 @@ use std::sync::{Arc, Mutex};
 
 use core_types::app_config::app_config;
 use core_types::workspace_paths;
-use engine_host::llama::LlamaEngine;
+use extension_host::{ExtensionBackend, ExtensionManifest, ExtensionProcess};
 use plugin_registry::{resolve_local_path, ModelEntry, ModelKind};
 
 #[derive(Default)]
 pub struct LocalModelState {
-    loaded: Mutex<HashMap<String, Arc<Mutex<LlamaEngine>>>>,
+    loaded: Mutex<HashMap<String, Arc<ExtensionProcess>>>,
 }
 
 impl LocalModelState {
-    pub fn get_loaded(&self, name: &str) -> Option<Arc<Mutex<LlamaEngine>>> {
+    pub fn get_loaded(&self, name: &str) -> Option<Arc<ExtensionProcess>> {
         crate::sync::lock(&self.loaded).get(name).cloned()
     }
 
-    pub fn any_loaded(&self) -> Option<Arc<Mutex<LlamaEngine>>> {
+    pub fn any_loaded(&self) -> Option<Arc<ExtensionProcess>> {
         crate::sync::lock(&self.loaded).values().next().cloned()
     }
+}
+
+/// Resolves the `engine-worker` binary's path next to the running app's own
+/// executable — works in dev (`cargo build` puts both binaries in the same
+/// `target/debug`/`target/release` directory) and, once packaged, for a
+/// Tauri sidecar (`bundle.externalBin`), which is likewise placed alongside
+/// the main executable. See the extension-ecosystem plan's packaging note.
+pub(crate) fn resolve_engine_worker_binary_path() -> Result<PathBuf, String> {
+    let current_exe = std::env::current_exe().map_err(|e| e.to_string())?;
+    let dir = current_exe
+        .parent()
+        .ok_or_else(|| "current executable has no parent directory".to_string())?;
+    Ok(dir.join(format!("engine-worker{}", std::env::consts::EXE_SUFFIX)))
+}
+
+/// The `llama-cpp-chat` extension's own manifest declares `provides`/
+/// `requires` and its backend command (the `engine-worker` binary), but not
+/// which `.gguf` model to load — that's chosen per-load by the user, not a
+/// property of the extension itself. This builds a real per-load manifest
+/// from the installed extension's declared backend, appending the concrete
+/// `--library`/`--model`/`--n-ctx` args for this specific load.
+pub(crate) fn build_chat_extension_manifest(
+    model_path: &Path,
+    engine_library_path: &Path,
+    n_ctx: u32,
+) -> Result<ExtensionManifest, String> {
+    let mut manifest = extension_host::find_extension("llama-cpp-chat").ok_or_else(|| {
+        "the llama-cpp-chat extension is not installed under .syl/extensions/".to_string()
+    })?;
+    manifest.backend = ExtensionBackend {
+        command: manifest.backend.command,
+        args: vec![
+            "--library".to_string(),
+            engine_library_path.display().to_string(),
+            "--model".to_string(),
+            model_path.display().to_string(),
+            "--n-ctx".to_string(),
+            n_ctx.to_string(),
+        ],
+    };
+    Ok(manifest)
 }
 
 #[derive(Clone, serde::Serialize)]
@@ -300,7 +341,7 @@ pub fn set_local_model_kind(name: String, kind: ModelKind) -> Result<(), String>
 }
 
 #[tauri::command]
-pub fn load_local_model(
+pub async fn load_local_model(
     name: String,
     state: tauri::State<'_, LocalModelState>,
 ) -> Result<(), String> {
@@ -348,31 +389,36 @@ pub fn load_local_model(
     )
     .map_err(|e| e.to_string())?;
 
-    let engine = LlamaEngine::load(
-        &engine_library_path,
+    let manifest = build_chat_extension_manifest(
         &model_path,
+        &engine_library_path,
         local_engine_config.context_size,
-        false,
-    )
-    .map_err(|e| e.to_string())?;
+    )?;
 
-    crate::sync::lock(&state.loaded).insert(name, Arc::new(Mutex::new(engine)));
+    // The model now loads in its own isolated `engine-worker` process — if
+    // llama.cpp segfaults or panics across its FFI boundary, only that
+    // process dies; the host observes a clean crash error instead of going
+    // down with it (see `extension_host::ExtensionProcess`).
+    let process = ExtensionProcess::spawn(manifest)
+        .await
+        .map_err(|e| e.to_string())?;
+
+    crate::sync::lock(&state.loaded).insert(name, Arc::new(process));
     Ok(())
 }
 
 /// Real token count for `text` against a specific loaded local model's own
 /// tokenizer — not an approximation. Errors if that model isn't loaded.
 #[tauri::command]
-pub fn count_local_tokens(
+pub async fn count_local_tokens(
     name: String,
     text: String,
     state: tauri::State<'_, LocalModelState>,
 ) -> Result<usize, String> {
-    let engine = state
+    let process = state
         .get_loaded(&name)
         .ok_or_else(|| format!("{name} is not loaded"))?;
-    let guard = crate::sync::lock(&engine);
-    guard.count_tokens(&text).map_err(|e| e.to_string())
+    process.count_tokens(&text).await.map_err(|e| e.to_string())
 }
 
 /// The context window (in tokens) the local chat engine is configured with.
@@ -382,14 +428,15 @@ pub fn local_context_size() -> i32 {
 }
 
 #[tauri::command]
-pub fn unload_local_model(
+pub async fn unload_local_model(
     name: String,
     state: tauri::State<'_, LocalModelState>,
 ) -> Result<(), String> {
-    crate::sync::lock(&state.loaded)
+    let process = crate::sync::lock(&state.loaded)
         .remove(&name)
-        .map(|_| ())
-        .ok_or_else(|| format!("{name} is not loaded"))
+        .ok_or_else(|| format!("{name} is not loaded"))?;
+    process.kill().await;
+    Ok(())
 }
 
 #[tauri::command]

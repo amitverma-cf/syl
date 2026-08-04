@@ -3,7 +3,7 @@ use std::sync::Arc;
 use core_types::app_config::app_config;
 use core_types::workspace_paths;
 use daemon::events::DaemonEvent;
-use engine_host::llama::LlamaEngine;
+use extension_host::ExtensionProcess;
 use memory::{
     ConversationStore, ConversationSummary, EmbeddingStore, Message, SqliteConversationStore,
     ToolPermissionDecision, ToolPermissionStore,
@@ -149,26 +149,22 @@ pub async fn generate(
             let system_prompt = effective_system_prompt.clone();
             match local_model_name {
                 Some(name) => {
-                    let engine = local_model_state.get_loaded(&name).ok_or_else(|| {
+                    let process = local_model_state.get_loaded(&name).ok_or_else(|| {
                         format!("local model {name} is not loaded; load it first in Settings")
                     })?;
-                    tauri::async_runtime::spawn_blocking(move || {
-                        let mut engine = crate::sync::lock(&engine);
-                        run_generate_with_engine(
-                            &mut engine,
-                            &store,
-                            &conversation_id_for_store,
-                            &prompt,
-                            &system_prompt,
-                            &tool_specs,
-                            &executor,
-                            move |piece| send_generation_piece(&piece_event, piece),
-                        )
-                    })
+                    run_generate_with_process(
+                        &process,
+                        &store,
+                        &conversation_id_for_store,
+                        &prompt,
+                        &system_prompt,
+                        &tool_specs,
+                        &executor,
+                        move |piece| send_generation_piece(&piece_event, piece),
+                    )
                     .await
-                    .map_err(|e| e.to_string())?
                 }
-                None => tauri::async_runtime::spawn_blocking(move || {
+                None => {
                     run_generate(
                         &store,
                         &conversation_id_for_store,
@@ -178,9 +174,8 @@ pub async fn generate(
                         &executor,
                         move |piece| send_generation_piece(&piece_event, piece),
                     )
-                })
-                .await
-                .map_err(|e| e.to_string())?,
+                    .await
+                }
             }
         }
     };
@@ -262,19 +257,15 @@ pub async fn generate_flow_draft(
         }
         None => {
             let name = local_model_name.ok_or_else(|| "no model specified".to_string())?;
-            let engine = local_model_state.get_loaded(&name).ok_or_else(|| {
+            let process = local_model_state.get_loaded(&name).ok_or_else(|| {
                 format!("local model {name} is not loaded; load it first in Settings")
             })?;
             let full_prompt = format!("{FLOW_GEN_SYSTEM_PROMPT}\n\nUser: {prompt}\nAssistant:");
             let max_tokens = app_config().local_engine.max_tokens;
-            tauri::async_runtime::spawn_blocking(move || {
-                let mut engine = crate::sync::lock(&engine);
-                engine
-                    .generate(&full_prompt, max_tokens, |_piece: &str| {})
-                    .map_err(|e| e.to_string())
-            })
-            .await
-            .map_err(|e| e.to_string())?
+            process
+                .generate(&full_prompt, max_tokens, |_piece: &str| {})
+                .await
+                .map_err(|e| e.to_string())
         }
     }
 }
@@ -562,9 +553,13 @@ pub(crate) async fn run_generate_cloud(
     Ok(())
 }
 
+/// Auto-resolves whichever chat model/engine the registry has, spawns it as
+/// an isolated extension process just for this one turn, and kills it
+/// afterward — the fallback path when the caller didn't already have a
+/// specific local model loaded via `load_local_model`.
 #[tracing::instrument(skip(store, tools, executor, on_piece))]
 #[allow(clippy::too_many_arguments)]
-pub(crate) fn run_generate(
+pub(crate) async fn run_generate(
     store: &Arc<SqliteConversationStore>,
     conversation_id: &str,
     prompt: &str,
@@ -581,16 +576,17 @@ pub(crate) fn run_generate(
     )
     .map_err(|e| e.to_string())?;
 
-    let mut engine = LlamaEngine::load(
-        &resolved.engine_library_path,
+    let manifest = crate::local_models::build_chat_extension_manifest(
         &resolved.model_path,
+        &resolved.engine_library_path,
         app_config().local_engine.context_size,
-        false,
-    )
-    .map_err(|e| e.to_string())?;
+    )?;
+    let process = ExtensionProcess::spawn(manifest)
+        .await
+        .map_err(|e| e.to_string())?;
 
-    run_generate_with_engine(
-        &mut engine,
+    let result = run_generate_with_process(
+        &process,
         store,
         conversation_id,
         prompt,
@@ -599,12 +595,15 @@ pub(crate) fn run_generate(
         executor,
         on_piece,
     )
+    .await;
+    process.kill().await;
+    result
 }
 
-#[tracing::instrument(skip(engine, store, tools, executor, on_piece))]
+#[tracing::instrument(skip(process, store, tools, executor, on_piece))]
 #[allow(clippy::too_many_arguments)]
-pub(crate) fn run_generate_with_engine(
-    engine: &mut LlamaEngine,
+pub(crate) async fn run_generate_with_process(
+    process: &ExtensionProcess,
     store: &Arc<SqliteConversationStore>,
     conversation_id: &str,
     prompt: &str,
@@ -617,21 +616,74 @@ pub(crate) fn run_generate_with_engine(
         .append_message(conversation_id, "user", prompt)
         .map_err(|e| e.to_string())?;
 
-    let response = engine_host::tool_loop::generate_with_tools(
-        engine,
+    let response = generate_with_tools_via_process(
+        process,
         system_prompt,
         prompt,
         tools,
         executor,
         conversation_id,
         app_config().local_engine.max_tokens,
-        |piece| on_piece(piece),
-    )?;
+        &mut on_piece,
+    )
+    .await?;
 
     store
         .append_message(conversation_id, "assistant", &response)
         .map_err(|e| e.to_string())?;
     Ok(())
+}
+
+/// The tool-calling loop, now genuinely `async` end to end: talking to the
+/// isolated `engine-worker` process over its stdio pipes doesn't block a
+/// thread the way the old direct FFI call did, so this calls
+/// `executor.call(...).await` directly instead of the previous
+/// `Handle::current().block_on(...)` hack that only existed because
+/// generation used to run inside a `spawn_blocking` closure. Reuses
+/// `engine_host::tool_loop`'s backend-agnostic prompt/parsing helpers —
+/// building the tool-catalog preamble and extracting a tool call from
+/// generated text doesn't care whether the text came from an in-process
+/// engine or an isolated extension process.
+#[allow(clippy::too_many_arguments)]
+async fn generate_with_tools_via_process(
+    process: &ExtensionProcess,
+    system_prompt: &str,
+    user_prompt: &str,
+    tools: &[tool::ToolSpec],
+    executor: &ToolExecutor,
+    conversation_id: &str,
+    max_tokens: i32,
+    mut on_piece: impl FnMut(&str),
+) -> Result<String, String> {
+    let mut running_prompt = format!(
+        "{system_prompt}{}\n\nUser: {user_prompt}\nAssistant:",
+        engine_host::tool_loop::tool_catalog_prompt(tools)
+    );
+
+    let max_tool_iterations = app_config().max_tool_iterations;
+    for _ in 0..max_tool_iterations {
+        let output = process
+            .generate(&running_prompt, max_tokens, &mut on_piece)
+            .await
+            .map_err(|e| e.to_string())?;
+
+        let Some((name, args)) = engine_host::tool_loop::extract_tool_call(&output) else {
+            return Ok(output);
+        };
+
+        let result = executor.call(conversation_id, &name, args).await;
+        let tool_output = match result {
+            Ok(value) => value.to_string(),
+            Err(err) => format!("error: {err}"),
+        };
+
+        running_prompt.push_str(&output);
+        running_prompt.push_str(&format!("\nTool output: {tool_output}\nAssistant:"));
+    }
+
+    Err(format!(
+        "tool-calling loop exceeded {max_tool_iterations} iterations without a final answer"
+    ))
 }
 
 #[cfg(test)]

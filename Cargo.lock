@@ -1503,6 +1503,19 @@ dependencies = [
 ]
 
 [[package]]
+name = "engine-worker"
+version = "0.1.0"
+dependencies = [
+ "engine-host",
+ "extension-host",
+ "plugin-registry",
+ "serde_json",
+ "tokio",
+ "tracing",
+ "tracing-subscriber",
+]
+
+[[package]]
 name = "enumflags2"
 version = "0.7.12"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1601,6 +1614,18 @@ dependencies = [
  "thiserror 1.0.69",
  "tokio",
  "tool",
+]
+
+[[package]]
+name = "extension-host"
+version = "0.1.0"
+dependencies = [
+ "core-types",
+ "serde",
+ "serde_json",
+ "thiserror 1.0.69",
+ "tokio",
+ "tracing",
 ]
 
 [[package]]
@@ -5431,6 +5456,7 @@ dependencies = [
  "daemon",
  "engine-host",
  "executor",
+ "extension-host",
  "memory",
  "plugin-registry",
  "provider",

@@ -6,6 +6,7 @@ use plugin_registry::{DownloadSource, EngineEntry, ModelEntry};
 pub fn ensure_workspace_seeded() {
     migrate_legacy_workspace();
     seed_flows();
+    seed_extensions();
 
     let syl_registry_dir = workspace_paths::registry_dir();
     let engines_seeded = syl_registry_dir.join("engines.json").exists();
@@ -107,6 +108,44 @@ fn copy_dir_recursive(source_dir: &Path, dest_dir: &Path) -> std::io::Result<()>
         }
     }
     Ok(())
+}
+
+/// Writes the `llama-cpp-chat` extension's manifest every launch (not a
+/// once-only seed like the registry/flows below) — its `backend.command`
+/// path depends on where *this* run's own executable lives (dev build
+/// output dir vs. a packaged sidecar location), which can change between
+/// builds, so it needs to self-heal on every startup rather than go stale
+/// after the first run.
+fn seed_extensions() {
+    let Ok(engine_worker_path) = crate::local_models::resolve_engine_worker_binary_path() else {
+        tracing::warn!("could not resolve the engine-worker binary path; local chat models via the extension system will not load");
+        return;
+    };
+
+    let manifest = extension_host::ExtensionManifest {
+        id: "llama-cpp-chat".to_string(),
+        version: env!("CARGO_PKG_VERSION").to_string(),
+        display_name: "llama.cpp Chat Engine".to_string(),
+        backend: extension_host::ExtensionBackend {
+            command: engine_worker_path.display().to_string(),
+            args: Vec::new(),
+        },
+        provides: vec!["inference.chat/v1".to_string()],
+        requires: Vec::new(),
+        contributes: None,
+    };
+
+    let dir = workspace_paths::extensions_dir().join("llama-cpp-chat");
+    if let Err(err) = std::fs::create_dir_all(&dir) {
+        tracing::error!(?err, "failed to create .syl/extensions/llama-cpp-chat");
+        return;
+    }
+    let Ok(json) = serde_json::to_string_pretty(&manifest) else {
+        return;
+    };
+    if let Err(err) = std::fs::write(dir.join("manifest.json"), json) {
+        tracing::error!(?err, "failed to write llama-cpp-chat extension manifest");
+    }
 }
 
 fn seed_flows() {

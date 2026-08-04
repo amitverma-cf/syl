@@ -1,0 +1,21 @@
+[package]
+name = "extension-host"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[dependencies]
+core-types.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+thiserror.workspace = true
+tracing.workspace = true
+tokio = { workspace = true, features = ["io-util", "io-std", "rt-multi-thread", "macros"] }
+
+# Only used by tests/fixtures/fixture_extension.rs, a real (not mocked)
+# minimal extension backend spawned in-test to exercise ExtensionProcess end
+# to end without needing a real GGUF model — mirrors this session's
+# mcp_http_fixture_server.rs precedent for the MCP HTTP transport.
+[[bin]]
+name = "fixture_extension"
+path = "tests/fixtures/fixture_extension.rs"
