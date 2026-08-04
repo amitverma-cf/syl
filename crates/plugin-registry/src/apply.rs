@@ -1,6 +1,23 @@
 use std::path::Path;
 
-use crate::{is_safe_relative_component, EngineEntry, ModelEntry, PluginRegistryError};
+use crate::{
+    is_safe_relative_component, verify_registry_signature, EngineEntry, ModelEntry,
+    PluginRegistryError,
+};
+
+/// A detached Ed25519 signature (hex) for each manifest file, checked against
+/// a hex-encoded public key before anything else — provenance ("this really
+/// came from the repo owner"), on top of the existing sha256/host-allowlist
+/// checks below, which are integrity, not provenance. Optional today because
+/// no real signing key has been provisioned/wired into a publish pipeline yet
+/// (see `examples/sign_registry.rs`) — once `registryManifestPublicKey` is
+/// set in `config/app.json`, a poll without valid signatures is rejected.
+#[derive(Debug, Clone, Copy)]
+pub struct RegistrySignatures<'a> {
+    pub public_key_hex: &'a str,
+    pub engines_signature_hex: &'a str,
+    pub models_signature_hex: &'a str,
+}
 
 /// Parses, validates, and atomically persists a freshly-polled `engines.json`/
 /// `models.json` pair into `registry_dir`.
@@ -24,7 +41,23 @@ pub fn apply_remote_registry(
     engines_json: &str,
     models_json: &str,
     allowed_hosts: &[String],
+    signatures: Option<RegistrySignatures<'_>>,
 ) -> Result<(), PluginRegistryError> {
+    if let Some(sigs) = signatures {
+        verify_registry_signature(
+            "engines.json",
+            engines_json.as_bytes(),
+            sigs.engines_signature_hex,
+            sigs.public_key_hex,
+        )?;
+        verify_registry_signature(
+            "models.json",
+            models_json.as_bytes(),
+            sigs.models_signature_hex,
+            sigs.public_key_hex,
+        )?;
+    }
+
     let engines: Vec<EngineEntry> =
         serde_json::from_str(engines_json).map_err(|source| PluginRegistryError::Parse {
             path: registry_dir.join("engines.json"),
@@ -129,7 +162,7 @@ fn write_atomically(dest: &Path, contents: &str) -> Result<(), PluginRegistryErr
 
 #[cfg(test)]
 mod tests {
-    use super::apply_remote_registry;
+    use super::{apply_remote_registry, RegistrySignatures};
     use crate::{load_engine_entries, load_model_entries, PluginRegistryError};
     use std::sync::atomic::{AtomicU64, Ordering};
 
@@ -165,6 +198,7 @@ mod tests {
             good_engines_json(),
             good_models_json(),
             &allowed_hosts(),
+            None,
         )
         .unwrap();
 
@@ -193,6 +227,7 @@ mod tests {
             malicious_engines,
             good_models_json(),
             &allowed_hosts(),
+            None,
         )
         .unwrap_err();
         assert!(matches!(
@@ -216,8 +251,14 @@ mod tests {
         let dir = temp_registry_dir("file-url");
         let sneaky_models = r#"[{"name":"test-model","kind":"chat","size_bytes":1,"quantization":"q1","required_engine":"llama-cpp","download_url":"file:///C:/Windows/System32/calc.exe","sha256":null,"extra_files":[]}]"#;
 
-        let err = apply_remote_registry(&dir, good_engines_json(), sneaky_models, &allowed_hosts())
-            .unwrap_err();
+        let err = apply_remote_registry(
+            &dir,
+            good_engines_json(),
+            sneaky_models,
+            &allowed_hosts(),
+            None,
+        )
+        .unwrap_err();
         assert!(matches!(
             err,
             PluginRegistryError::RejectedRemoteEntry { .. }
@@ -231,8 +272,9 @@ mod tests {
         let dir = temp_registry_dir("http-downgrade");
         let downgraded = r#"[{"id":"llama-cpp","version":"1","platform":"windows-x64","download_url":"http://github.com/ggml-org/llama.cpp/releases/download/v1/llama.zip","sha256":null,"library_file":"llama.dll"}]"#;
 
-        let err = apply_remote_registry(&dir, downgraded, good_models_json(), &allowed_hosts())
-            .unwrap_err();
+        let err =
+            apply_remote_registry(&dir, downgraded, good_models_json(), &allowed_hosts(), None)
+                .unwrap_err();
         assert!(matches!(
             err,
             PluginRegistryError::RejectedRemoteEntry { .. }
@@ -251,6 +293,7 @@ mod tests {
             malicious_engines,
             good_models_json(),
             &allowed_hosts(),
+            None,
         )
         .unwrap_err();
         assert!(matches!(
@@ -266,8 +309,14 @@ mod tests {
         let dir = temp_registry_dir("extra-files-bad-host");
         let sneaky_models = r#"[{"name":"test-model","kind":"chat","size_bytes":1,"quantization":"q1","required_engine":"llama-cpp","download_url":"https://huggingface.co/org/repo/resolve/main/model.gguf","sha256":null,"extra_files":["https://attacker.example/payload"]}]"#;
 
-        let err = apply_remote_registry(&dir, good_engines_json(), sneaky_models, &allowed_hosts())
-            .unwrap_err();
+        let err = apply_remote_registry(
+            &dir,
+            good_engines_json(),
+            sneaky_models,
+            &allowed_hosts(),
+            None,
+        )
+        .unwrap_err();
         assert!(matches!(
             err,
             PluginRegistryError::RejectedRemoteEntry { .. }
@@ -287,6 +336,7 @@ mod tests {
             custom_host_engines,
             good_models_json(),
             &allowed_hosts(),
+            None,
         )
         .unwrap_err();
         assert!(matches!(
@@ -302,6 +352,7 @@ mod tests {
             custom_host_engines,
             good_models_json(),
             &custom_allowlist,
+            None,
         )
         .unwrap();
 
@@ -316,14 +367,76 @@ mod tests {
             good_engines_json(),
             good_models_json(),
             &allowed_hosts(),
+            None,
         )
         .unwrap();
 
         let updated_engines = r#"[{"id":"llama-cpp","version":"2","platform":"windows-x64","download_url":"https://github.com/ggml-org/llama.cpp/releases/download/v2/llama.zip","sha256":null,"library_file":"llama.dll"}]"#;
-        apply_remote_registry(&dir, updated_engines, good_models_json(), &allowed_hosts()).unwrap();
+        apply_remote_registry(
+            &dir,
+            updated_engines,
+            good_models_json(),
+            &allowed_hosts(),
+            None,
+        )
+        .unwrap();
 
         let engines = load_engine_entries(&dir).unwrap();
         assert_eq!(engines[0].version, "2");
+
+        std::fs::remove_dir_all(&dir).unwrap();
+    }
+
+    #[test]
+    fn a_poll_with_valid_signatures_is_accepted() {
+        use ed25519_dalek::{Signer, SigningKey};
+
+        let signing_key = SigningKey::from_bytes(&[3u8; 32]);
+        let public_key_hex = hex::encode(signing_key.verifying_key().to_bytes());
+        let engines_signature_hex =
+            hex::encode(signing_key.sign(good_engines_json().as_bytes()).to_bytes());
+        let models_signature_hex =
+            hex::encode(signing_key.sign(good_models_json().as_bytes()).to_bytes());
+
+        let dir = temp_registry_dir("signed-ok");
+        apply_remote_registry(
+            &dir,
+            good_engines_json(),
+            good_models_json(),
+            &allowed_hosts(),
+            Some(RegistrySignatures {
+                public_key_hex: &public_key_hex,
+                engines_signature_hex: &engines_signature_hex,
+                models_signature_hex: &models_signature_hex,
+            }),
+        )
+        .unwrap();
+
+        std::fs::remove_dir_all(&dir).unwrap();
+    }
+
+    #[test]
+    fn a_poll_with_an_invalid_signature_is_rejected_and_writes_nothing() {
+        use ed25519_dalek::SigningKey;
+
+        let signing_key = SigningKey::from_bytes(&[3u8; 32]);
+        let public_key_hex = hex::encode(signing_key.verifying_key().to_bytes());
+
+        let dir = temp_registry_dir("signed-bad");
+        let err = apply_remote_registry(
+            &dir,
+            good_engines_json(),
+            good_models_json(),
+            &allowed_hosts(),
+            Some(RegistrySignatures {
+                public_key_hex: &public_key_hex,
+                engines_signature_hex: &"00".repeat(64),
+                models_signature_hex: &"00".repeat(64),
+            }),
+        )
+        .unwrap_err();
+        assert!(matches!(err, PluginRegistryError::InvalidSignature { .. }));
+        assert!(!dir.join("engines.json").exists());
 
         std::fs::remove_dir_all(&dir).unwrap();
     }

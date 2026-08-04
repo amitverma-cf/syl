@@ -39,6 +39,14 @@ pub struct AppConfig {
     pub default_flow_name: String,
     pub registry_poll_url: String,
     pub registry_allowed_hosts: Vec<String>,
+    /// Hex-encoded Ed25519 public key the registry manifest's signatures must
+    /// verify against. `None` (the default until a real keypair is
+    /// provisioned and wired into a publish pipeline — see
+    /// `plugin_registry`'s `examples/sign_registry.rs`) means signature
+    /// verification is skipped, matching today's actual registryPollUrl,
+    /// which publishes no signatures.
+    #[serde(default)]
+    pub registry_manifest_public_key: Option<String>,
     pub max_tool_iterations: u32,
     pub context_budget_chars: usize,
     pub local_engine: LocalEngineConfig,

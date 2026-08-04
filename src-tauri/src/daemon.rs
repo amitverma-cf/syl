@@ -96,11 +96,18 @@ async fn poll_registry(event_bus: Arc<EventBus>) {
         // validation, or a network/parse error, leaves the last-known-good registry
         // files exactly as they were, so a compromised or malformed response can
         // never partially or fully overwrite what's already trusted.
+        // Signature verification is wired end to end (see plugin_registry::signing)
+        // but not yet enabled here: no real Ed25519 keypair has been provisioned or
+        // wired into a publish pipeline for the actual registryPollUrl yet, so
+        // requiring one today would just break every real poll. Pass real
+        // signatures once `examples/sign_registry.rs` is run against a real
+        // publish and the resulting public key is set in config/app.json.
         plugin_registry::apply_remote_registry(
             &registry_dir,
             &engines_json,
             &models_json,
             &app_config().registry_allowed_hosts,
+            None,
         )?;
 
         if let Some(etag) = &poll.engines_etag {
