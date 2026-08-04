@@ -56,6 +56,12 @@ pub fn set_api_key(path: &Path, env_var: &str, key: &str) -> std::io::Result<()>
     write_env_file(path, &entries)
 }
 
+pub fn delete_api_key(path: &Path, env_var: &str) -> std::io::Result<()> {
+    let mut entries = load_env_file(path);
+    entries.remove(env_var);
+    write_env_file(path, &entries)
+}
+
 pub fn list_providers(path: &Path) -> Vec<ProviderInfo> {
     let entries = load_env_file(path);
     app_config()

@@ -1,4 +1,4 @@
-use provider::{list_providers, load_env_file, set_api_key};
+use provider::{delete_api_key, list_providers, load_env_file, set_api_key};
 
 fn temp_env_path(name: &str) -> std::path::PathBuf {
     std::env::temp_dir().join(format!(
@@ -68,6 +68,41 @@ fn load_env_file_strips_surrounding_double_or_single_quotes() {
     assert_eq!(entries.get("API_KEY").unwrap(), "nvapi-abc123");
     assert_eq!(entries.get("PLAIN").unwrap(), "unquoted");
 
+    std::fs::remove_file(&path).ok();
+}
+
+#[test]
+fn delete_api_key_removes_the_key_and_leaves_others_untouched() {
+    let path = temp_env_path("delete-one");
+    set_api_key(&path, "OPENAI_API_KEY", "sk-openai").unwrap();
+    set_api_key(&path, "GEMINI_API_KEY", "sk-gemini").unwrap();
+
+    delete_api_key(&path, "OPENAI_API_KEY").unwrap();
+
+    let providers = list_providers(&path);
+    assert!(
+        !providers
+            .iter()
+            .find(|p| p.name == "OpenAI")
+            .unwrap()
+            .configured
+    );
+    assert!(
+        providers
+            .iter()
+            .find(|p| p.name == "Gemini")
+            .unwrap()
+            .configured
+    );
+
+    std::fs::remove_file(&path).ok();
+}
+
+#[test]
+fn delete_api_key_is_a_no_op_when_the_key_was_never_set() {
+    let path = temp_env_path("delete-missing");
+    delete_api_key(&path, "OPENAI_API_KEY").unwrap();
+    assert!(!list_providers(&path).iter().any(|p| p.configured));
     std::fs::remove_file(&path).ok();
 }
 

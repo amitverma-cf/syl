@@ -171,6 +171,7 @@ pub fn run() {
             flows::validate_flow_json,
             providers::list_providers,
             providers::set_provider_api_key,
+            providers::delete_provider_api_key,
             providers::list_cloud_models,
             providers::list_custom_providers,
             providers::add_custom_provider,

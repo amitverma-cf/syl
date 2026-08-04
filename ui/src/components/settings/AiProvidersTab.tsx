@@ -40,6 +40,7 @@ function AiProvidersTab({
   const [newProviderKey, setNewProviderKey] = useState("");
   const [addingProvider, setAddingProvider] = useState(false);
 
+  const [deletingKey, setDeletingKey] = useState<string | null>(null);
   const [deletingModel, setDeletingModel] = useState<string | null>(null);
   const [downloadingModel, setDownloadingModel] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -59,6 +60,22 @@ function AiProvidersTab({
       toast.error(String(err));
     } finally {
       setSavingProvider(null);
+    }
+  }
+
+  async function handleDeleteKey(envVar: string) {
+    if (!confirm(`Delete the saved ${envVar} key? This can't be undone.`)) return;
+    setDeletingKey(envVar);
+    setError(null);
+    try {
+      await invoke("delete_provider_api_key", { envVar });
+      refreshProviders();
+      toast.success(`${envVar} deleted`);
+    } catch (err) {
+      setError(String(err));
+      toast.error(String(err));
+    } finally {
+      setDeletingKey(null);
     }
   }
 
@@ -160,6 +177,16 @@ function AiProvidersTab({
             Save
           </Button>
           {p.configured && <Badge>configured</Badge>}
+          {p.configured && (
+            <IconButton
+              icon={IconTrash}
+              iconSize={14}
+              variant="danger"
+              title="Delete key"
+              onClick={() => deletingKey !== p.envVar && handleDeleteKey(p.envVar)}
+              style={{ opacity: deletingKey === p.envVar ? 0.5 : 1 }}
+            />
+          )}
         </div>
       ))}
 
