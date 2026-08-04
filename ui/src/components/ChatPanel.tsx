@@ -14,7 +14,7 @@ import {
   IconArrowUp,
   IconChevronDown,
 } from "@tabler/icons-react";
-import { Button, DropdownMenu, type DropdownMenuGroup } from "./ui";
+import { Button, DropdownMenu, Input, type DropdownMenuGroup } from "./ui";
 import type {
   CloudModel,
   FlowStateInfo,
@@ -70,6 +70,8 @@ function ChatPanel({
   const [error, setError] = useState<string | null>(null);
   const [selectedModelOverride, setSelectedModel] = useState<string | null>(null);
   const [modelMenuOpen, setModelMenuOpen] = useState(false);
+  const [customModelInputOpen, setCustomModelInputOpen] = useState(false);
+  const [customModelIdDraft, setCustomModelIdDraft] = useState("");
   const [activeFlow, setActiveFlow] = useState<FlowStateInfo | null>(null);
   const [permissionRequest, setPermissionRequest] = useState<PermissionRequest | null>(null);
   const transcriptRef = useRef<HTMLDivElement>(null);
@@ -162,7 +164,7 @@ function ChatPanel({
   const selectedLocalModelLoaded = selectedLocalModelInfo?.loaded ?? false;
   const selectedModelLabel = isLocalModel
     ? selectedLocalModelName
-    : cloudModels.find((m) => m.id === selectedModel)?.label ?? "Select a model";
+    : cloudModels.find((m) => m.id === selectedModel)?.label || selectedModel || "Select a model";
 
   const [tokenCounts, setTokenCounts] = useState<number[]>([]);
   const setContextUsage = useShellStore((s) => s.setContextUsage);
@@ -200,6 +202,13 @@ function ChatPanel({
     } finally {
       setIsLoadingModel(false);
     }
+  }
+
+  function submitCustomModelId() {
+    const id = customModelIdDraft.trim();
+    if (id) setSelectedModel(id);
+    setCustomModelIdDraft("");
+    setCustomModelInputOpen(false);
   }
 
   async function unloadSelectedLocalModel() {
@@ -499,41 +508,82 @@ function ChatPanel({
               </Button>
             )}
 
-            <DropdownMenu
-              open={modelMenuOpen}
-              onOpenChange={setModelMenuOpen}
-              trigger={
-                <div className="dropdown" onClick={() => setModelMenuOpen((v) => !v)}>
-                  <span>{selectedModelLabel}</span>
-                  <IconChevronDown size={13} aria-hidden />
-                </div>
-              }
-              groups={[
-                ...(chatLocalModels.length > 0
-                  ? [
-                      {
-                        label: "LOCAL",
-                        items: chatLocalModels.map((m) => ({
-                          key: m.name,
-                          label: m.name,
-                          sublabel: m.loaded ? "loaded" : undefined,
-                          selected: selectedModel === `${LOCAL_MODEL_PREFIX}${m.name}`,
-                          onSelect: () => setSelectedModel(`${LOCAL_MODEL_PREFIX}${m.name}`),
-                        })),
-                      },
-                    ]
-                  : []),
-                ...Array.from(cloudGroups.entries()).map(([provider, models]): DropdownMenuGroup => ({
-                  label: provider.toUpperCase(),
-                  items: models.map((m) => ({
-                    key: m.id,
-                    label: m.label,
-                    selected: selectedModel === m.id,
-                    onSelect: () => setSelectedModel(m.id),
+            {customModelInputOpen ? (
+              <form
+                onSubmit={(e) => {
+                  e.preventDefault();
+                  submitCustomModelId();
+                }}
+                style={{ display: "flex", alignItems: "center", gap: 4 }}
+              >
+                <Input
+                  autoFocus
+                  placeholder="provider/model-id"
+                  value={customModelIdDraft}
+                  onChange={(e) => setCustomModelIdDraft(e.target.value)}
+                  onKeyDown={(e) => {
+                    if (e.key === "Escape") {
+                      setCustomModelIdDraft("");
+                      setCustomModelInputOpen(false);
+                    }
+                  }}
+                  onBlur={() => {
+                    if (!customModelIdDraft.trim()) setCustomModelInputOpen(false);
+                  }}
+                  style={{ width: 160, fontSize: 11 }}
+                />
+                <Button type="submit" style={{ fontSize: 11 }}>
+                  Use
+                </Button>
+              </form>
+            ) : (
+              <DropdownMenu
+                open={modelMenuOpen}
+                onOpenChange={setModelMenuOpen}
+                trigger={
+                  <div className="dropdown" onClick={() => setModelMenuOpen((v) => !v)}>
+                    <span>{selectedModelLabel}</span>
+                    <IconChevronDown size={13} aria-hidden />
+                  </div>
+                }
+                groups={[
+                  ...(chatLocalModels.length > 0
+                    ? [
+                        {
+                          label: "LOCAL",
+                          items: chatLocalModels.map((m) => ({
+                            key: m.name,
+                            label: m.name,
+                            sublabel: m.loaded ? "loaded" : undefined,
+                            selected: selectedModel === `${LOCAL_MODEL_PREFIX}${m.name}`,
+                            onSelect: () => setSelectedModel(`${LOCAL_MODEL_PREFIX}${m.name}`),
+                          })),
+                        },
+                      ]
+                    : []),
+                  ...Array.from(cloudGroups.entries()).map(([provider, models]): DropdownMenuGroup => ({
+                    label: provider.toUpperCase(),
+                    items: models.map((m) => ({
+                      key: m.id,
+                      label: m.label,
+                      selected: selectedModel === m.id,
+                      onSelect: () => setSelectedModel(m.id),
+                    })),
                   })),
-                })),
-              ]}
-            />
+                  {
+                    label: "OTHER",
+                    items: [
+                      {
+                        key: "custom-model-id",
+                        label: "Other model ID…",
+                        onSelect: () => setCustomModelInputOpen(true),
+                        attrs: { "data-testid": "custom-model-id-item" },
+                      },
+                    ],
+                  },
+                ]}
+              />
+            )}
 
             <div
               className={`send${!prompt.trim() || isGenerating || isLoadingModel || !selectedModel ? " disabled" : ""}`}
