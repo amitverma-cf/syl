@@ -85,6 +85,15 @@ function ChatPanel({
   const [permissionRequest, setPermissionRequest] = useState<PermissionRequest | null>(null);
   const transcriptRef = useRef<HTMLDivElement>(null);
 
+  const pendingPieceRef = useRef("");
+  const rafIdRef = useRef<number | null>(null);
+  useEffect(
+    () => () => {
+      if (rafIdRef.current !== null) cancelAnimationFrame(rafIdRef.current);
+    },
+    [],
+  );
+
   const [isGeneratingImage, setIsGeneratingImage] = useState(false);
   const [isRecording, setIsRecording] = useState(false);
   const [isSpeaking, setIsSpeaking] = useState(false);
@@ -258,25 +267,51 @@ function ChatPanel({
       { role: "assistant", content: "", createdAt: Date.now() / 1000 },
     ]);
 
+    function flushPendingPiece() {
+      if (!pendingPieceRef.current) return;
+      const text = pendingPieceRef.current;
+      pendingPieceRef.current = "";
+      setMessages((prev) => {
+        const next = [...prev];
+        const last = next[next.length - 1];
+        next[next.length - 1] = { ...last, content: last.content + text };
+        return next;
+      });
+    }
+
+    function cancelScheduledFlush() {
+      if (rafIdRef.current !== null) {
+        cancelAnimationFrame(rafIdRef.current);
+        rafIdRef.current = null;
+      }
+    }
+
     const channel = new Channel<ArrayBuffer>();
     channel.onmessage = (raw) => {
       const bytes = new Uint8Array(raw);
       const tag = bytes[0];
       if (tag === GENERATION_EVENT_TAG_PIECE) {
-        const text = textDecoder.decode(bytes.subarray(1));
-        setMessages((prev) => {
-          const next = [...prev];
-          const last = next[next.length - 1];
-          next[next.length - 1] = { ...last, content: last.content + text };
-          return next;
-        });
+        // Buffer pieces and flush to React state at most once per animation
+        // frame instead of on every IPC message — a fast local model can
+        // emit far more tokens per second than the display can render.
+        pendingPieceRef.current += textDecoder.decode(bytes.subarray(1));
+        if (rafIdRef.current === null) {
+          rafIdRef.current = requestAnimationFrame(() => {
+            rafIdRef.current = null;
+            flushPendingPiece();
+          });
+        }
       } else if (tag === GENERATION_EVENT_TAG_DONE) {
+        cancelScheduledFlush();
+        flushPendingPiece();
         setIsGenerating(false);
         invoke<FlowStateInfo | null>("flow_status", { conversationId })
           .then(setActiveFlow)
           .catch((err) => setError(String(err)));
         onTurnComplete();
       } else if (tag === GENERATION_EVENT_TAG_ERROR) {
+        cancelScheduledFlush();
+        flushPendingPiece();
         const message = textDecoder.decode(bytes.subarray(1));
         setError(message);
         toast.error(message);
