@@ -1484,6 +1484,7 @@ name = "engine-host"
 version = "0.1.0"
 dependencies = [
  "bindgen 0.70.1",
+ "bumpalo",
  "core-types",
  "hound",
  "libloading 0.8.9",
