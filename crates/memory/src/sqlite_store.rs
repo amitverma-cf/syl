@@ -312,6 +312,52 @@ impl ToolPermissionStore for SqliteConversationStore {
         )?;
         Ok(())
     }
+
+    fn clear_tool_permission(
+        &self,
+        conversation_id: &str,
+        tool_name: &str,
+    ) -> Result<(), MemoryError> {
+        let conn = self
+            .conn
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
+        conn.execute(
+            "DELETE FROM tool_permissions WHERE conversation_id = ?1 AND tool_name = ?2",
+            (conversation_id, tool_name),
+        )?;
+        Ok(())
+    }
+
+    fn list_tool_permissions(
+        &self,
+        conversation_id: &str,
+    ) -> Result<Vec<(String, ToolPermissionDecision)>, MemoryError> {
+        let conn = self
+            .conn
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
+        let mut stmt = conn.prepare(
+            "SELECT tool_name, decision FROM tool_permissions WHERE conversation_id = ?1
+             ORDER BY tool_name ASC",
+        )?;
+        let rows = stmt.query_map((conversation_id,), |row| {
+            let tool_name: String = row.get(0)?;
+            let decision: String = row.get(1)?;
+            Ok((
+                tool_name,
+                match decision.as_str() {
+                    "allow" => ToolPermissionDecision::Allow,
+                    _ => ToolPermissionDecision::Deny,
+                },
+            ))
+        })?;
+        let mut permissions = Vec::new();
+        for row in rows {
+            permissions.push(row?);
+        }
+        Ok(permissions)
+    }
 }
 
 fn encode_vector(vector: &[f32]) -> Vec<u8> {

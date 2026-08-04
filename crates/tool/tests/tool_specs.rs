@@ -53,6 +53,19 @@ fn tool_executor_tool_specs_reflects_registered_tools() {
         ) -> Result<(), memory::MemoryError> {
             Ok(())
         }
+        fn clear_tool_permission(
+            &self,
+            _conversation_id: &str,
+            _tool_name: &str,
+        ) -> Result<(), memory::MemoryError> {
+            Ok(())
+        }
+        fn list_tool_permissions(
+            &self,
+            _conversation_id: &str,
+        ) -> Result<Vec<(String, memory::ToolPermissionDecision)>, memory::MemoryError> {
+            Ok(Vec::new())
+        }
     }
 
     let executor = ToolExecutor::new(
@@ -90,6 +103,19 @@ fn tool_specs_filtered_empty_allowlist_means_unrestricted() {
             _decision: memory::ToolPermissionDecision,
         ) -> Result<(), memory::MemoryError> {
             Ok(())
+        }
+        fn clear_tool_permission(
+            &self,
+            _conversation_id: &str,
+            _tool_name: &str,
+        ) -> Result<(), memory::MemoryError> {
+            Ok(())
+        }
+        fn list_tool_permissions(
+            &self,
+            _conversation_id: &str,
+        ) -> Result<Vec<(String, memory::ToolPermissionDecision)>, memory::MemoryError> {
+            Ok(Vec::new())
         }
     }
 

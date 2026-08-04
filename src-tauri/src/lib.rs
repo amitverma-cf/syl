@@ -136,6 +136,8 @@ pub fn run() {
             commands::call_tool,
             commands::list_tools,
             commands::respond_permission,
+            commands::list_tool_permissions,
+            commands::clear_tool_permission,
             models::list_available_models,
             models::download_model,
             local_models::list_local_models,

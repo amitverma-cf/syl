@@ -2,15 +2,14 @@ use std::path::Path;
 
 use crate::{is_safe_relative_component, EngineEntry, ModelEntry, PluginRegistryError};
 
-/// Hosts a polled registry entry's `download_url`/`extra_files` is allowed to point
-/// at. This is deliberately narrow and specific to what the app's own committed
-/// `registry/engines.json`/`models.json` actually reference today (GitHub Releases
-/// for engine archives, Hugging Face for model weights) — not a general-purpose
-/// allowlist, so it only needs to grow if a legitimate new source is added.
-const ALLOWED_REMOTE_HOSTS: &[&str] = &["github.com", "huggingface.co"];
-
 /// Parses, validates, and atomically persists a freshly-polled `engines.json`/
 /// `models.json` pair into `registry_dir`.
+///
+/// `allowed_hosts` is the caller-supplied list of hosts a polled entry's
+/// `download_url`/`extra_files` may point at — deliberately not a hardcoded constant
+/// in this crate, so the app can make it a config value (`config/app.json`'s
+/// `registryAllowedHosts`) rather than a code change when a legitimate new source is
+/// added.
 ///
 /// Every entry across both files is validated before anything is written — one bad
 /// entry rejects the whole poll rather than silently dropping just that entry, since
@@ -24,6 +23,7 @@ pub fn apply_remote_registry(
     registry_dir: &Path,
     engines_json: &str,
     models_json: &str,
+    allowed_hosts: &[String],
 ) -> Result<(), PluginRegistryError> {
     let engines: Vec<EngineEntry> =
         serde_json::from_str(engines_json).map_err(|source| PluginRegistryError::Parse {
@@ -37,10 +37,10 @@ pub fn apply_remote_registry(
         })?;
 
     for engine in &engines {
-        validate_engine_entry(engine)?;
+        validate_engine_entry(engine, allowed_hosts)?;
     }
     for model in &models {
-        validate_model_entry(model)?;
+        validate_model_entry(model, allowed_hosts)?;
     }
 
     write_atomically(&registry_dir.join("engines.json"), engines_json)?;
@@ -49,8 +49,11 @@ pub fn apply_remote_registry(
     Ok(())
 }
 
-fn validate_engine_entry(entry: &EngineEntry) -> Result<(), PluginRegistryError> {
-    validate_remote_url(&entry.id, &entry.download_url)?;
+fn validate_engine_entry(
+    entry: &EngineEntry,
+    allowed_hosts: &[String],
+) -> Result<(), PluginRegistryError> {
+    validate_remote_url(&entry.id, &entry.download_url, allowed_hosts)?;
     if let Some(library_file) = &entry.library_file {
         if !is_safe_relative_component(library_file) {
             return Err(PluginRegistryError::RejectedRemoteEntry {
@@ -62,10 +65,13 @@ fn validate_engine_entry(entry: &EngineEntry) -> Result<(), PluginRegistryError>
     Ok(())
 }
 
-fn validate_model_entry(entry: &ModelEntry) -> Result<(), PluginRegistryError> {
-    validate_remote_url(&entry.name, &entry.download_url)?;
+fn validate_model_entry(
+    entry: &ModelEntry,
+    allowed_hosts: &[String],
+) -> Result<(), PluginRegistryError> {
+    validate_remote_url(&entry.name, &entry.download_url, allowed_hosts)?;
     for extra in &entry.extra_files {
-        validate_remote_url(&entry.name, extra)?;
+        validate_remote_url(&entry.name, extra, allowed_hosts)?;
     }
     Ok(())
 }
@@ -74,11 +80,16 @@ fn validate_model_entry(entry: &ModelEntry) -> Result<(), PluginRegistryError> {
 /// response has no legitimate reason to name a path on the polling machine) and
 /// resolve to an allowlisted host, so a compromised registry response can't redirect
 /// a download at arbitrary attacker infrastructure.
-fn validate_remote_url(entry_name: &str, raw_url: &str) -> Result<(), PluginRegistryError> {
-    let parsed = url::Url::parse(raw_url).map_err(|err| PluginRegistryError::RejectedRemoteEntry {
-        entry: entry_name.to_string(),
-        reason: format!("{raw_url} is not a valid URL: {err}"),
-    })?;
+fn validate_remote_url(
+    entry_name: &str,
+    raw_url: &str,
+    allowed_hosts: &[String],
+) -> Result<(), PluginRegistryError> {
+    let parsed =
+        url::Url::parse(raw_url).map_err(|err| PluginRegistryError::RejectedRemoteEntry {
+            entry: entry_name.to_string(),
+            reason: format!("{raw_url} is not a valid URL: {err}"),
+        })?;
 
     if parsed.scheme() != "https" {
         return Err(PluginRegistryError::RejectedRemoteEntry {
@@ -94,7 +105,7 @@ fn validate_remote_url(entry_name: &str, raw_url: &str) -> Result<(), PluginRegi
             reason: format!("{raw_url} has no host"),
         })?;
 
-    if !ALLOWED_REMOTE_HOSTS.contains(&host) {
+    if !allowed_hosts.iter().any(|h| h == host) {
         return Err(PluginRegistryError::RejectedRemoteEntry {
             entry: entry_name.to_string(),
             reason: format!("{host} is not an allowed download host"),
@@ -142,10 +153,20 @@ mod tests {
         r#"[{"name":"test-model","kind":"chat","size_bytes":1,"quantization":"q1","required_engine":"llama-cpp","download_url":"https://huggingface.co/org/repo/resolve/main/model.gguf","sha256":null,"extra_files":[]}]"#
     }
 
+    fn allowed_hosts() -> Vec<String> {
+        vec!["github.com".to_string(), "huggingface.co".to_string()]
+    }
+
     #[test]
     fn accepts_and_persists_a_registry_with_only_allowlisted_hosts() {
         let dir = temp_registry_dir("ok");
-        apply_remote_registry(&dir, good_engines_json(), good_models_json()).unwrap();
+        apply_remote_registry(
+            &dir,
+            good_engines_json(),
+            good_models_json(),
+            &allowed_hosts(),
+        )
+        .unwrap();
 
         let engines = load_engine_entries(&dir).unwrap();
         assert_eq!(engines.len(), 1);
@@ -167,7 +188,13 @@ mod tests {
 
         let malicious_engines = r#"[{"id":"llama-cpp","version":"1","platform":"windows-x64","download_url":"https://attacker.example/llama.zip","sha256":null,"library_file":"llama.dll"}]"#;
 
-        let err = apply_remote_registry(&dir, malicious_engines, good_models_json()).unwrap_err();
+        let err = apply_remote_registry(
+            &dir,
+            malicious_engines,
+            good_models_json(),
+            &allowed_hosts(),
+        )
+        .unwrap_err();
         assert!(matches!(
             err,
             PluginRegistryError::RejectedRemoteEntry { .. }
@@ -189,7 +216,8 @@ mod tests {
         let dir = temp_registry_dir("file-url");
         let sneaky_models = r#"[{"name":"test-model","kind":"chat","size_bytes":1,"quantization":"q1","required_engine":"llama-cpp","download_url":"file:///C:/Windows/System32/calc.exe","sha256":null,"extra_files":[]}]"#;
 
-        let err = apply_remote_registry(&dir, good_engines_json(), sneaky_models).unwrap_err();
+        let err = apply_remote_registry(&dir, good_engines_json(), sneaky_models, &allowed_hosts())
+            .unwrap_err();
         assert!(matches!(
             err,
             PluginRegistryError::RejectedRemoteEntry { .. }
@@ -203,7 +231,8 @@ mod tests {
         let dir = temp_registry_dir("http-downgrade");
         let downgraded = r#"[{"id":"llama-cpp","version":"1","platform":"windows-x64","download_url":"http://github.com/ggml-org/llama.cpp/releases/download/v1/llama.zip","sha256":null,"library_file":"llama.dll"}]"#;
 
-        let err = apply_remote_registry(&dir, downgraded, good_models_json()).unwrap_err();
+        let err = apply_remote_registry(&dir, downgraded, good_models_json(), &allowed_hosts())
+            .unwrap_err();
         assert!(matches!(
             err,
             PluginRegistryError::RejectedRemoteEntry { .. }
@@ -217,7 +246,13 @@ mod tests {
         let dir = temp_registry_dir("library-file-traversal");
         let malicious_engines = r#"[{"id":"llama-cpp","version":"1","platform":"windows-x64","download_url":"https://github.com/ggml-org/llama.cpp/releases/download/v1/llama.zip","sha256":null,"library_file":"../../../evil.dll"}]"#;
 
-        let err = apply_remote_registry(&dir, malicious_engines, good_models_json()).unwrap_err();
+        let err = apply_remote_registry(
+            &dir,
+            malicious_engines,
+            good_models_json(),
+            &allowed_hosts(),
+        )
+        .unwrap_err();
         assert!(matches!(
             err,
             PluginRegistryError::RejectedRemoteEntry { .. }
@@ -231,7 +266,8 @@ mod tests {
         let dir = temp_registry_dir("extra-files-bad-host");
         let sneaky_models = r#"[{"name":"test-model","kind":"chat","size_bytes":1,"quantization":"q1","required_engine":"llama-cpp","download_url":"https://huggingface.co/org/repo/resolve/main/model.gguf","sha256":null,"extra_files":["https://attacker.example/payload"]}]"#;
 
-        let err = apply_remote_registry(&dir, good_engines_json(), sneaky_models).unwrap_err();
+        let err = apply_remote_registry(&dir, good_engines_json(), sneaky_models, &allowed_hosts())
+            .unwrap_err();
         assert!(matches!(
             err,
             PluginRegistryError::RejectedRemoteEntry { .. }
@@ -241,12 +277,50 @@ mod tests {
     }
 
     #[test]
+    fn the_allowlist_is_genuinely_caller_configurable() {
+        let dir = temp_registry_dir("custom-allowlist");
+        let custom_host_engines = r#"[{"id":"llama-cpp","version":"1","platform":"windows-x64","download_url":"https://example.internal/llama.zip","sha256":null,"library_file":"llama.dll"}]"#;
+
+        // Rejected against the default allowlist...
+        let err = apply_remote_registry(
+            &dir,
+            custom_host_engines,
+            good_models_json(),
+            &allowed_hosts(),
+        )
+        .unwrap_err();
+        assert!(matches!(
+            err,
+            PluginRegistryError::RejectedRemoteEntry { .. }
+        ));
+
+        // ...but accepted once the caller adds that host to its own allowlist, proving
+        // this isn't a hardcoded constant anymore.
+        let custom_allowlist = vec!["example.internal".to_string(), "huggingface.co".to_string()];
+        apply_remote_registry(
+            &dir,
+            custom_host_engines,
+            good_models_json(),
+            &custom_allowlist,
+        )
+        .unwrap();
+
+        std::fs::remove_dir_all(&dir).unwrap();
+    }
+
+    #[test]
     fn a_second_good_poll_replaces_the_first() {
         let dir = temp_registry_dir("replace");
-        apply_remote_registry(&dir, good_engines_json(), good_models_json()).unwrap();
+        apply_remote_registry(
+            &dir,
+            good_engines_json(),
+            good_models_json(),
+            &allowed_hosts(),
+        )
+        .unwrap();
 
         let updated_engines = r#"[{"id":"llama-cpp","version":"2","platform":"windows-x64","download_url":"https://github.com/ggml-org/llama.cpp/releases/download/v2/llama.zip","sha256":null,"library_file":"llama.dll"}]"#;
-        apply_remote_registry(&dir, updated_engines, good_models_json()).unwrap();
+        apply_remote_registry(&dir, updated_engines, good_models_json(), &allowed_hosts()).unwrap();
 
         let engines = load_engine_entries(&dir).unwrap();
         assert_eq!(engines[0].version, "2");

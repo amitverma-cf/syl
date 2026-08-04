@@ -99,7 +99,7 @@ function SettingsOverlay(props: SettingsOverlayProps) {
             {settingsPane === "memory" && (
               <MemoryTab stats={props.stats} conversations={props.conversations} />
             )}
-            {settingsPane === "tools" && <ToolsTab />}
+            {settingsPane === "tools" && <ToolsTab activeConversationId={props.activeConversationId} />}
             {settingsPane === "jobs" && <ScheduledJobsTab cloudModels={props.cloudModels} />}
             {settingsPane === "flows" && (
               <FlowTemplatesTab activeConversationId={props.activeConversationId} />

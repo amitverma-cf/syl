@@ -79,10 +79,7 @@ fn download_to_cache_rejects_and_deletes_a_download_that_fails_its_checksum() {
     let cache_dir = temp_dir("cache-mismatch");
 
     let err = download_to_cache(&url, &cache_dir, Some(&wrong_hash)).unwrap_err();
-    assert!(matches!(
-        err,
-        PluginRegistryError::ChecksumMismatch { .. }
-    ));
+    assert!(matches!(err, PluginRegistryError::ChecksumMismatch { .. }));
 
     // The whole point: an unverified/tampered artifact must not be left behind for a
     // later caller to pick up and trust.
@@ -134,10 +131,7 @@ fn download_and_extract_zip_rejects_and_cleans_up_an_archive_that_fails_its_chec
     let extract_dir = scratch.join("extracted");
 
     let err = download_and_extract_zip(&url, &extract_dir, Some(&wrong_hash)).unwrap_err();
-    assert!(matches!(
-        err,
-        PluginRegistryError::ChecksumMismatch { .. }
-    ));
+    assert!(matches!(err, PluginRegistryError::ChecksumMismatch { .. }));
 
     // Neither the final extracted directory nor a leftover staging directory should
     // exist — a mismatched zip must never reach the point of being extracted to disk.

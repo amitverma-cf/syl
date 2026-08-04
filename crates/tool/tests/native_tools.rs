@@ -117,6 +117,40 @@ async fn run_command_captures_stdout_and_exit_code() {
 }
 
 #[tokio::test]
+async fn read_rejects_a_symlinked_subdirectory_escaping_the_workspace() {
+    let workspace_root = temp_workspace();
+    let outside = temp_workspace();
+    std::fs::write(outside.join("secret.txt"), "top secret").unwrap();
+
+    let link = workspace_root.join("escape");
+    #[cfg(windows)]
+    let created = std::os::windows::fs::symlink_dir(&outside, &link).is_ok();
+    #[cfg(not(windows))]
+    let created = std::os::unix::fs::symlink(&outside, &link).is_ok();
+
+    if !created {
+        // Creating a symlink needs Developer Mode/admin on Windows or appropriate
+        // permissions elsewhere — skip rather than fail CI environments that lack it.
+        std::fs::remove_dir_all(&workspace_root).unwrap();
+        std::fs::remove_dir_all(&outside).unwrap();
+        eprintln!("skipping: could not create a symlink in this environment");
+        return;
+    }
+
+    let read_tool = ReadFileTool {
+        workspace_root: workspace_root.clone(),
+    };
+    let err = read_tool
+        .call(serde_json::json!({"path": "escape/secret.txt"}))
+        .await
+        .unwrap_err();
+
+    assert!(matches!(err, ToolError::InvalidArgs(_)));
+    std::fs::remove_dir_all(&outside).unwrap();
+    let _ = std::fs::remove_dir_all(&workspace_root);
+}
+
+#[tokio::test]
 async fn run_command_runs_in_the_workspace_root() {
     let workspace_root = temp_workspace();
     std::fs::write(workspace_root.join("marker.txt"), "x").unwrap();

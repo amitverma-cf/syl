@@ -71,6 +71,7 @@ async fn poll_registry(event_bus: Arc<EventBus>) {
             &workspace_paths::registry_dir(),
             &engines_json,
             &models_json,
+            &app_config().registry_allowed_hosts,
         )
     })
     .await;
@@ -80,7 +81,10 @@ async fn poll_registry(event_bus: Arc<EventBus>) {
             event_bus.publish(DaemonEvent::RegistryPolled { ok: true });
         }
         Ok(Err(err)) => {
-            tracing::warn!(?err, "failed to poll or validate the remote plugin registry");
+            tracing::warn!(
+                ?err,
+                "failed to poll or validate the remote plugin registry"
+            );
             event_bus.publish(DaemonEvent::RegistryPolled { ok: false });
         }
         Err(err) => {

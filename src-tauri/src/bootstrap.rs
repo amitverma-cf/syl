@@ -68,7 +68,11 @@ fn seed_model(entry: ModelEntry) -> Option<ModelEntry> {
     })
 }
 
-fn seed_into(download_url: &str, dest_dir: &Path, expected_sha256: Option<&str>) -> Option<PathBuf> {
+fn seed_into(
+    download_url: &str,
+    dest_dir: &Path,
+    expected_sha256: Option<&str>,
+) -> Option<PathBuf> {
     match plugin_registry::resolve_download_url(download_url) {
         Ok(DownloadSource::Local(source_path)) => {
             let source_dir = source_path.parent()?;

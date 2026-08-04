@@ -38,6 +38,7 @@ pub struct AppConfig {
     pub known_cloud_providers: Vec<CloudProviderEntry>,
     pub default_flow_name: String,
     pub registry_poll_url: String,
+    pub registry_allowed_hosts: Vec<String>,
     pub max_tool_iterations: u32,
     pub local_engine: LocalEngineConfig,
     pub sd_engine: SdEngineConfig,

@@ -4,7 +4,10 @@ use core_types::app_config::app_config;
 use core_types::workspace_paths;
 use daemon::events::DaemonEvent;
 use engine_host::llama::LlamaEngine;
-use memory::{ConversationStore, ConversationSummary, Message, SqliteConversationStore};
+use memory::{
+    ConversationStore, ConversationSummary, Message, SqliteConversationStore,
+    ToolPermissionDecision, ToolPermissionStore,
+};
 use plugin_registry::ModelKind;
 use tauri::ipc::Channel;
 use tool::ToolExecutor;
@@ -322,6 +325,50 @@ pub fn respond_permission(
     state: tauri::State<'_, ToolState>,
 ) {
     state.prompter.resolve(request_id, response);
+}
+
+#[derive(serde::Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ToolPermissionEntry {
+    pub tool_name: String,
+    pub decision: ToolPermissionDecision,
+}
+
+/// Every remembered "Always allow"/"Always deny" decision for a conversation, so
+/// Settings can show a real revoke UI instead of the only prior workaround (editing
+/// the SQLite file by hand).
+#[tauri::command]
+pub fn list_tool_permissions(
+    conversation_id: String,
+    state: tauri::State<'_, AppState>,
+) -> Result<Vec<ToolPermissionEntry>, String> {
+    state
+        .conversation_store
+        .list_tool_permissions(&conversation_id)
+        .map(|entries| {
+            entries
+                .into_iter()
+                .map(|(tool_name, decision)| ToolPermissionEntry {
+                    tool_name,
+                    decision,
+                })
+                .collect()
+        })
+        .map_err(|e| e.to_string())
+}
+
+/// Forgets a remembered decision — the next call to that tool in this conversation
+/// prompts again.
+#[tauri::command]
+pub fn clear_tool_permission(
+    conversation_id: String,
+    tool_name: String,
+    state: tauri::State<'_, AppState>,
+) -> Result<(), String> {
+    state
+        .conversation_store
+        .clear_tool_permission(&conversation_id, &tool_name)
+        .map_err(|e| e.to_string())
 }
 
 #[tracing::instrument(skip(store, tools, executor, on_piece))]

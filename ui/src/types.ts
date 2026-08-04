@@ -87,6 +87,11 @@ export interface ToolSpec {
   inputSchema: unknown;
 }
 
+export interface ToolPermissionEntry {
+  toolName: string;
+  decision: "Allow" | "Deny";
+}
+
 export interface LocalModelInfo {
   name: string;
   sizeBytes: number;

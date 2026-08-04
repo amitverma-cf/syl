@@ -12,7 +12,10 @@ use crate::PluginRegistryError;
 /// collision-resistant name instead of failing outright.
 fn cache_file_name(url: &str) -> String {
     let without_fragment = url.split('#').next().unwrap_or(url);
-    let without_query = without_fragment.split('?').next().unwrap_or(without_fragment);
+    let without_query = without_fragment
+        .split('?')
+        .next()
+        .unwrap_or(without_fragment);
     let candidate = without_query
         .rsplit(['/', '\\'])
         .next()

@@ -102,6 +102,20 @@ pub trait ToolPermissionStore: Send + Sync {
         tool_name: &str,
         decision: ToolPermissionDecision,
     ) -> Result<(), MemoryError>;
+
+    /// Forgets a remembered "Always" decision, so the next call to that tool in this
+    /// conversation prompts again. A no-op if nothing was remembered.
+    fn clear_tool_permission(
+        &self,
+        conversation_id: &str,
+        tool_name: &str,
+    ) -> Result<(), MemoryError>;
+
+    /// Every remembered decision for a conversation, for a revoke UI to list.
+    fn list_tool_permissions(
+        &self,
+        conversation_id: &str,
+    ) -> Result<Vec<(String, ToolPermissionDecision)>, MemoryError>;
 }
 
 pub fn open(db_path: &Path) -> Result<SqliteConversationStore, MemoryError> {
