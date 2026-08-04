@@ -17,6 +17,15 @@ export default defineConfig({
         "src/**/*.d.ts",
         "src/test/**",
       ],
+      // A floor, not a target — set at/slightly below real coverage as of the
+      // testing-gaps pass so it catches regressions without blocking normal
+      // work. Ratchet up over time as more components gain tests.
+      thresholds: {
+        statements: 20,
+        branches: 20,
+        functions: 20,
+        lines: 20,
+      },
     },
   },
 });
