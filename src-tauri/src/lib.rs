@@ -107,6 +107,8 @@ pub fn run() {
             app.manage(speech::OnnxTtsState::default());
 
             app.manage(DaemonState::default());
+            app.state::<local_models::LocalModelState>()
+                .set_event_bus(app.state::<DaemonState>().event_bus.clone());
             tauri::async_runtime::spawn(daemon::spawn(app.handle().clone()));
 
             let show_item = MenuItem::with_id(app, "show", "Show", true, None::<&str>)?;

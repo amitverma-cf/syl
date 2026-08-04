@@ -7,9 +7,16 @@
 //! Speaks `inference.chat/v1`: `inference/generate` splits the prompt on
 //! whitespace and streams each word back as an `inference/piece`
 //! notification before responding with the joined text; `inference/countTokens`
-//! returns the whitespace word count. A prompt of literally `"CRASH"` exits
-//! the process immediately without responding, to let tests exercise crash
-//! detection deterministically.
+//! returns the whitespace word count. A few prompts are magic sentinels for
+//! deterministically exercising failure modes:
+//! - `"CRASH"` exits the process immediately without responding.
+//! - `"HANG"` silently drops the request — no response, no notifications —
+//!   so a timeout test doesn't need a slow/flaky real delay to prove a hang
+//!   is detected; the fixture just never answers.
+//! - `"GARBAGE_MID_STREAM"` streams one real piece, then writes a
+//!   deliberately non-JSON line to stdout before continuing normally —
+//!   proving the host's malformed-line handling doesn't corrupt or hang the
+//!   in-flight request.
 
 use extension_host::RpcMessage;
 use serde_json::json;
@@ -50,6 +57,27 @@ async fn main() {
                     .unwrap_or_default();
                 if prompt == "CRASH" {
                     std::process::exit(1);
+                }
+                if prompt == "HANG" {
+                    continue;
+                }
+                if prompt == "GARBAGE_MID_STREAM" {
+                    send(
+                        &mut stdout,
+                        RpcMessage::notification(
+                            "inference/piece",
+                            json!({ "requestId": id, "text": "before" }),
+                        ),
+                    )
+                    .await;
+                    let _ = stdout.write_all(b"not json at all\n").await;
+                    let _ = stdout.flush().await;
+                    send(
+                        &mut stdout,
+                        RpcMessage::response_ok(id, json!({ "text": "before after" })),
+                    )
+                    .await;
+                    continue;
                 }
                 let words: Vec<&str> = prompt.split_whitespace().collect();
                 for word in &words {

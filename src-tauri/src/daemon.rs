@@ -6,7 +6,7 @@ use core_types::app_config::app_config;
 use core_types::workspace_paths;
 use daemon::events::{DaemonEvent, EventBus};
 use daemon::scheduler::CronScheduler;
-use tauri::{AppHandle, Manager};
+use tauri::{AppHandle, Emitter, Manager};
 
 use crate::scheduled_jobs::{register_persisted_jobs, SchedulerState};
 
@@ -24,6 +24,8 @@ impl Default for DaemonState {
 
 pub async fn spawn(app: AppHandle) {
     let event_bus = app.state::<DaemonState>().event_bus.clone();
+
+    spawn_frontend_bridge(app.clone(), event_bus.clone());
 
     let scheduler = match CronScheduler::new().await {
         Ok(scheduler) => scheduler,
@@ -56,6 +58,27 @@ pub async fn spawn(app: AppHandle) {
         return;
     }
     app.manage(scheduler_state);
+}
+
+/// Forwards `DaemonEvent`s the frontend actually needs to know about as real
+/// Tauri events — today just `LocalModelCrashed`, mirroring the existing
+/// `"tool-permission-timeout"` listener pattern (`permission.rs`) so a
+/// crashed local model surfaces as a toast instead of only a backend log
+/// line.
+fn spawn_frontend_bridge(app: AppHandle, event_bus: Arc<EventBus>) {
+    let mut receiver = event_bus.subscribe();
+    tauri::async_runtime::spawn(async move {
+        loop {
+            match receiver.recv().await {
+                Ok(DaemonEvent::LocalModelCrashed { name }) => {
+                    let _ = app.emit("local-model-crashed", name);
+                }
+                Ok(_) => {}
+                Err(tokio::sync::broadcast::error::RecvError::Lagged(_)) => continue,
+                Err(tokio::sync::broadcast::error::RecvError::Closed) => break,
+            }
+        }
+    });
 }
 
 async fn poll_registry(event_bus: Arc<EventBus>) {

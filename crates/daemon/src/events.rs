@@ -12,6 +12,7 @@ pub enum DaemonEvent {
     ToolCallCompleted { tool: String, ok: bool },
     RegistryPolled { ok: bool },
     ScheduledJobFired { job: String, ok: bool },
+    LocalModelCrashed { name: String },
 }
 
 pub struct EventBus {

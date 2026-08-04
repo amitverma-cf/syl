@@ -21,13 +21,38 @@ pub enum ExtensionProcessError {
     Write(#[source] std::io::Error),
     #[error("extension process crashed or exited unexpectedly")]
     Crashed,
+    #[error(
+        "extension {extension:?}'s manifest declares capability {capability:?}, but its \
+         initialize response did not confirm it"
+    )]
+    CapabilityMismatch {
+        extension: String,
+        capability: String,
+    },
     #[error("extension does not provide capability {0:?}")]
     CapabilityNotProvided(String),
     #[error("extension returned an error: {0}")]
     Extension(String),
     #[error("malformed response from extension: {0}")]
     Malformed(String),
+    #[error("extension did not respond within {0:?}")]
+    Timeout(std::time::Duration),
+    #[error("too many in-flight requests to this extension ({MAX_PENDING_REQUESTS} max)")]
+    TooManyPendingRequests,
 }
+
+/// How long a single request (`initialize`, `countTokens`, or one `generate`
+/// call) is allowed to take before it's treated as hung rather than merely
+/// slow. A hang is a different failure mode than a crash — the reader task
+/// never sees stdout close, so nothing else would ever unblock the caller.
+const REQUEST_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(300);
+
+/// A defensive cap on concurrent in-flight requests to one extension
+/// process. Chat is turn-based in practice (one `generate` at a time per
+/// loaded model), so this should never be reached in normal use — it exists
+/// to fail clearly if a caller bug ever fires off requests faster than the
+/// extension can drain them, rather than growing `pending` unbounded.
+const MAX_PENDING_REQUESTS: usize = 64;
 
 /// One event routed to an in-flight request's channel, translated from the
 /// raw `RpcMessage` the reader task parses off the extension's stdout.
@@ -52,10 +77,29 @@ pub struct ExtensionProcess {
     next_id: AtomicU64,
     pending: Arc<std::sync::Mutex<HashMap<u64, mpsc::UnboundedSender<WorkerEvent>>>>,
     dead: Arc<AtomicBool>,
+    request_timeout: std::time::Duration,
+    // Kept alive for the process's lifetime: a Windows Job Object with
+    // `JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE` set, so the OS kills this child
+    // automatically if the host process itself dies abnormally (crash,
+    // `taskkill /F`) instead of exiting cleanly — ordinary parent/child
+    // semantics do not guarantee that on their own.
+    #[cfg(windows)]
+    _job: Option<win32job::Job>,
 }
 
 impl ExtensionProcess {
     pub async fn spawn(manifest: ExtensionManifest) -> Result<Self, ExtensionProcessError> {
+        Self::spawn_with_timeout(manifest, REQUEST_TIMEOUT).await
+    }
+
+    /// Same as [`Self::spawn`], but with an explicit per-request timeout
+    /// instead of the default [`REQUEST_TIMEOUT`] — mainly for tests, which
+    /// shouldn't have to wait the full production timeout to prove a hang
+    /// is detected.
+    pub async fn spawn_with_timeout(
+        manifest: ExtensionManifest,
+        request_timeout: std::time::Duration,
+    ) -> Result<Self, ExtensionProcessError> {
         check_requirements(&manifest.requires)
             .map_err(|e| ExtensionProcessError::UnsupportedRequirement(manifest.id.clone(), e))?;
 
@@ -78,6 +122,9 @@ impl ExtensionProcess {
         spawn_stdout_reader(stdout, pending.clone(), dead.clone());
         spawn_stderr_logger(stderr, manifest.id.clone());
 
+        #[cfg(windows)]
+        let job = assign_kill_on_close_job(&child, &manifest.id);
+
         let process = Self {
             manifest,
             child: AsyncMutex::new(child),
@@ -85,9 +132,19 @@ impl ExtensionProcess {
             next_id: AtomicU64::new(1),
             pending,
             dead,
+            request_timeout,
+            #[cfg(windows)]
+            _job: job,
         };
 
-        process.initialize().await?;
+        if let Err(err) = process.initialize().await {
+            // The child is already running at this point — a failed
+            // handshake (mismatch, hang, crash) must not leak it. `spawn`
+            // returning `Err` should mean "no process is running", the same
+            // contract as if `Command::spawn` itself had failed.
+            process.kill().await;
+            return Err(err);
+        }
         Ok(process)
     }
 
@@ -109,11 +166,10 @@ impl ExtensionProcess {
             .unwrap_or_default();
         for expected in &self.manifest.provides {
             if !provided.contains(expected) {
-                tracing::warn!(
-                    extension = %self.manifest.id,
-                    capability = %expected,
-                    "extension's manifest declares a capability its initialize response did not confirm"
-                );
+                return Err(ExtensionProcessError::CapabilityMismatch {
+                    extension: self.manifest.id.clone(),
+                    capability: expected.clone(),
+                });
             }
         }
         Ok(())
@@ -135,19 +191,26 @@ impl ExtensionProcess {
         }
         let id = self.next_id.fetch_add(1, Ordering::SeqCst);
         let (tx, mut rx) = mpsc::unbounded_channel();
-        self.pending.lock().unwrap().insert(id, tx);
+        {
+            let mut pending = self.pending.lock().unwrap();
+            if pending.len() >= MAX_PENDING_REQUESTS {
+                return Err(ExtensionProcessError::TooManyPendingRequests);
+            }
+            pending.insert(id, tx);
+        }
 
         self.send(RpcMessage::request(id, method, params)).await?;
 
-        let event = rx.recv().await;
+        let event = tokio::time::timeout(self.request_timeout, rx.recv()).await;
         self.pending.lock().unwrap().remove(&id);
         match event {
-            Some(WorkerEvent::Done(value)) => Ok(value),
-            Some(WorkerEvent::Error(message)) => Err(ExtensionProcessError::Extension(message)),
-            Some(WorkerEvent::Crashed) | None => Err(ExtensionProcessError::Crashed),
-            Some(WorkerEvent::Piece(_)) => Err(ExtensionProcessError::Malformed(
+            Ok(Some(WorkerEvent::Done(value))) => Ok(value),
+            Ok(Some(WorkerEvent::Error(message))) => Err(ExtensionProcessError::Extension(message)),
+            Ok(Some(WorkerEvent::Crashed)) | Ok(None) => Err(ExtensionProcessError::Crashed),
+            Ok(Some(WorkerEvent::Piece(_))) => Err(ExtensionProcessError::Malformed(
                 "unexpected streaming piece for a non-streaming request".to_string(),
             )),
+            Err(_elapsed) => Err(ExtensionProcessError::Timeout(self.request_timeout)),
         }
     }
 
@@ -206,7 +269,13 @@ impl ExtensionProcess {
         }
         let id = self.next_id.fetch_add(1, Ordering::SeqCst);
         let (tx, mut rx) = mpsc::unbounded_channel();
-        self.pending.lock().unwrap().insert(id, tx);
+        {
+            let mut pending = self.pending.lock().unwrap();
+            if pending.len() >= MAX_PENDING_REQUESTS {
+                return Err(ExtensionProcessError::TooManyPendingRequests);
+            }
+            pending.insert(id, tx);
+        }
 
         self.send(RpcMessage::request(
             id,
@@ -216,9 +285,14 @@ impl ExtensionProcess {
         .await?;
 
         loop {
-            match rx.recv().await {
-                Some(WorkerEvent::Piece(text)) => on_piece(&text),
-                Some(WorkerEvent::Done(value)) => {
+            // The timeout resets on every received event (including each
+            // streamed piece), not just once for the whole call — a model
+            // that's actively streaming tokens shouldn't time out just
+            // because the overall generation is long; only a period of
+            // total silence should.
+            match tokio::time::timeout(self.request_timeout, rx.recv()).await {
+                Ok(Some(WorkerEvent::Piece(text))) => on_piece(&text),
+                Ok(Some(WorkerEvent::Done(value))) => {
                     self.pending.lock().unwrap().remove(&id);
                     return value
                         .get("text")
@@ -230,13 +304,17 @@ impl ExtensionProcess {
                             )
                         });
                 }
-                Some(WorkerEvent::Error(message)) => {
+                Ok(Some(WorkerEvent::Error(message))) => {
                     self.pending.lock().unwrap().remove(&id);
                     return Err(ExtensionProcessError::Extension(message));
                 }
-                Some(WorkerEvent::Crashed) | None => {
+                Ok(Some(WorkerEvent::Crashed)) | Ok(None) => {
                     self.pending.lock().unwrap().remove(&id);
                     return Err(ExtensionProcessError::Crashed);
+                }
+                Err(_elapsed) => {
+                    self.pending.lock().unwrap().remove(&id);
+                    return Err(ExtensionProcessError::Timeout(self.request_timeout));
                 }
             }
         }
@@ -314,4 +392,47 @@ fn spawn_stderr_logger(stderr: tokio::process::ChildStderr, extension_id: String
             tracing::warn!(extension = %extension_id, "{line}");
         }
     });
+}
+
+/// Puts `child` into a fresh Job Object configured with
+/// `JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE`, so Windows kills it automatically
+/// when the returned `Job` handle closes — including when the host process
+/// dies abnormally (crash, `taskkill /F`) rather than exiting cleanly, which
+/// ordinary parent/child process semantics do not guarantee on their own.
+/// Returns `None` (logging a warning) if the job couldn't be created or the
+/// child couldn't be assigned to it; the extension still runs normally, it
+/// just loses this specific orphan-prevention guarantee.
+#[cfg(windows)]
+fn assign_kill_on_close_job(child: &Child, extension_id: &str) -> Option<win32job::Job> {
+    let job = match win32job::Job::create() {
+        Ok(job) => job,
+        Err(err) => {
+            tracing::warn!(extension = %extension_id, "failed to create job object: {err}");
+            return None;
+        }
+    };
+
+    let mut info = match job.query_extended_limit_info() {
+        Ok(info) => info,
+        Err(err) => {
+            tracing::warn!(extension = %extension_id, "failed to query job limit info: {err}");
+            return None;
+        }
+    };
+    info.limit_kill_on_job_close();
+    if let Err(err) = job.set_extended_limit_info(&info) {
+        tracing::warn!(extension = %extension_id, "failed to set job limit info: {err}");
+        return None;
+    }
+
+    let Some(handle) = child.raw_handle() else {
+        tracing::warn!(extension = %extension_id, "child has no raw handle to assign to job object");
+        return None;
+    };
+    if let Err(err) = job.assign_process(handle as isize) {
+        tracing::warn!(extension = %extension_id, "failed to assign process to job object: {err}");
+        return None;
+    }
+
+    Some(job)
 }
