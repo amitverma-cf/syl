@@ -441,3 +441,72 @@ pub fn delete_local_model(
     let json = serde_json::to_string_pretty(&remaining).map_err(|e| e.to_string())?;
     std::fs::write(&local_models_file, json).map_err(|e| e.to_string())
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn temp_model_file(label: &str) -> PathBuf {
+        static COUNTER: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+        let unique = COUNTER.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+        let path = std::env::temp_dir().join(format!(
+            "syl-local-models-test-{label}-{}-{unique}.gguf",
+            std::process::id()
+        ));
+        std::fs::write(&path, b"fake gguf contents").unwrap();
+        path
+    }
+
+    fn file_url(path: &Path) -> String {
+        format!("file://{}", path.to_string_lossy().replace('\\', "/"))
+    }
+
+    fn entry(name: &str, kind: ModelKind, download_url: String) -> ModelEntry {
+        ModelEntry {
+            name: name.to_string(),
+            kind,
+            size_bytes: 0,
+            quantization: "Q4_K_M".to_string(),
+            required_engine: "llama-cpp".to_string(),
+            download_url,
+            sha256: None,
+            extra_files: Vec::new(),
+        }
+    }
+
+    #[test]
+    fn kind_for_path_finds_the_entry_whose_resolved_download_matches() {
+        let chat_file = temp_model_file("chat");
+        let embed_file = temp_model_file("embed");
+        let entries = vec![
+            entry("chat-model", ModelKind::Chat, file_url(&chat_file)),
+            entry("embed-model", ModelKind::Embedding, file_url(&embed_file)),
+        ];
+
+        assert_eq!(kind_for_path(&entries, &chat_file), Some(ModelKind::Chat));
+        assert_eq!(
+            kind_for_path(&entries, &embed_file),
+            Some(ModelKind::Embedding)
+        );
+
+        std::fs::remove_file(&chat_file).ok();
+        std::fs::remove_file(&embed_file).ok();
+    }
+
+    #[test]
+    fn kind_for_path_returns_none_for_a_path_not_in_the_registry() {
+        let chat_file = temp_model_file("unregistered-chat");
+        let entries = vec![entry("chat-model", ModelKind::Chat, file_url(&chat_file))];
+
+        let unrelated = std::env::temp_dir().join("some-other-file.gguf");
+        assert_eq!(kind_for_path(&entries, &unrelated), None);
+
+        std::fs::remove_file(&chat_file).ok();
+    }
+
+    #[test]
+    fn kind_for_path_returns_none_for_an_empty_registry() {
+        let path = std::env::temp_dir().join("anything.gguf");
+        assert_eq!(kind_for_path(&[], &path), None);
+    }
+}
