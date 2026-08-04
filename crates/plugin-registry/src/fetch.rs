@@ -182,6 +182,101 @@ fn fetch_text(url: &str) -> Result<String, PluginRegistryError> {
         })
 }
 
+/// One file's outcome from a conditional (`If-None-Match`) fetch.
+pub enum ConditionalFetch {
+    /// The server confirmed nothing changed (`304 Not Modified`) — no body was sent.
+    NotModified,
+    /// The server sent a full body, optionally with a new `ETag` to remember for next time.
+    Modified { body: String, etag: Option<String> },
+}
+
+/// The result of conditionally polling both registry files. `engines`/`models` are
+/// `None` when that file's `304 Not Modified` means there's nothing new to apply;
+/// `engines_etag`/`models_etag` carry forward whichever `ETag` should be remembered
+/// for the *next* poll (the new one on a change, or the previous one when unchanged).
+pub struct RegistryPollResult {
+    pub engines: Option<String>,
+    pub models: Option<String>,
+    pub engines_etag: Option<String>,
+    pub models_etag: Option<String>,
+}
+
+/// Polls `engines.json`/`models.json`, sending `If-None-Match: {prev_*_etag}` for
+/// whichever files a previous poll already has an `ETag` for — cuts the recurring
+/// registry-poll cron job down to a cheap `304` response on the common case where
+/// nothing has changed, instead of re-downloading and re-validating the full registry
+/// every time.
+pub fn fetch_remote_registry_conditional(
+    base_url: &str,
+    prev_engines_etag: Option<&str>,
+    prev_models_etag: Option<&str>,
+) -> Result<RegistryPollResult, PluginRegistryError> {
+    let engines = fetch_text_conditional(&format!("{base_url}/engines.json"), prev_engines_etag)?;
+    let models = fetch_text_conditional(&format!("{base_url}/models.json"), prev_models_etag)?;
+
+    let (engines_body, engines_etag) = match engines {
+        ConditionalFetch::Modified { body, etag } => (
+            Some(body),
+            etag.or_else(|| prev_engines_etag.map(str::to_string)),
+        ),
+        ConditionalFetch::NotModified => (None, prev_engines_etag.map(str::to_string)),
+    };
+    let (models_body, models_etag) = match models {
+        ConditionalFetch::Modified { body, etag } => (
+            Some(body),
+            etag.or_else(|| prev_models_etag.map(str::to_string)),
+        ),
+        ConditionalFetch::NotModified => (None, prev_models_etag.map(str::to_string)),
+    };
+
+    Ok(RegistryPollResult {
+        engines: engines_body,
+        models: models_body,
+        engines_etag,
+        models_etag,
+    })
+}
+
+fn fetch_text_conditional(
+    url: &str,
+    prev_etag: Option<&str>,
+) -> Result<ConditionalFetch, PluginRegistryError> {
+    let mut request = ureq::get(url);
+    if let Some(etag) = prev_etag {
+        request = request.set("If-None-Match", etag);
+    }
+    match request.call() {
+        // ureq treats 304 as a normal (non-error) response, not `ureq::Error::Status`
+        // (that's reserved for genuine 4xx/5xx failures) — it has no body to read.
+        Ok(response) if response.status() == 304 => Ok(ConditionalFetch::NotModified),
+        Ok(response) => {
+            let etag = response.header("ETag").map(str::to_string);
+            let body = response
+                .into_string()
+                .map_err(|err| PluginRegistryError::Network {
+                    url: url.to_string(),
+                    source: std::io::Error::other(err),
+                })?;
+            Ok(ConditionalFetch::Modified { body, etag })
+        }
+        Err(ureq::Error::Status(304, _)) => Ok(ConditionalFetch::NotModified),
+        Err(err) => Err(to_error(url, err)),
+    }
+}
+
+/// Reads a previously-remembered `ETag` for `{name}.json` from `registry_dir`, if any.
+pub fn read_etag(registry_dir: &Path, name: &str) -> Option<String> {
+    std::fs::read_to_string(registry_dir.join(format!("{name}.etag")))
+        .ok()
+        .map(|s| s.trim().to_string())
+        .filter(|s| !s.is_empty())
+}
+
+/// Persists an `ETag` for `{name}.json` in `registry_dir`, for the next conditional poll.
+pub fn write_etag(registry_dir: &Path, name: &str, etag: &str) -> std::io::Result<()> {
+    std::fs::write(registry_dir.join(format!("{name}.etag")), etag)
+}
+
 fn to_error(url: &str, err: ureq::Error) -> PluginRegistryError {
     match err {
         ureq::Error::Status(status, _) => PluginRegistryError::Http {
