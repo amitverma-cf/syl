@@ -18,7 +18,6 @@ import { Button, DropdownMenu, Input, type DropdownMenuGroup } from "./ui";
 import type {
   CloudModel,
   FlowStateInfo,
-  GenerationEvent,
   LocalModelInfo,
   PermissionRequest,
   ProviderInfo,
@@ -29,6 +28,16 @@ import { useShellStore } from "../store/shellStore";
 import { cloudContextWindow, countTokens, localContextSize } from "../lib/tokens";
 
 const LOCAL_MODEL_PREFIX = "local::";
+
+// Wire tags for the raw-byte generation event channel — must match
+// src-tauri/src/commands.rs's GENERATION_EVENT_TAG_* constants. Sent as raw
+// bytes (a one-byte tag + UTF-8 payload) instead of a per-piece JSON envelope,
+// since pieces are by far the highest-frequency message on this channel.
+const GENERATION_EVENT_TAG_PIECE = 0;
+const GENERATION_EVENT_TAG_DONE = 1;
+const GENERATION_EVENT_TAG_ERROR = 2;
+
+const textDecoder = new TextDecoder();
 
 interface ChatPanelProps {
   conversationId: string;
@@ -249,24 +258,28 @@ function ChatPanel({
       { role: "assistant", content: "", createdAt: Date.now() / 1000 },
     ]);
 
-    const channel = new Channel<GenerationEvent>();
-    channel.onmessage = (event) => {
-      if (event.type === "piece") {
+    const channel = new Channel<ArrayBuffer>();
+    channel.onmessage = (raw) => {
+      const bytes = new Uint8Array(raw);
+      const tag = bytes[0];
+      if (tag === GENERATION_EVENT_TAG_PIECE) {
+        const text = textDecoder.decode(bytes.subarray(1));
         setMessages((prev) => {
           const next = [...prev];
           const last = next[next.length - 1];
-          next[next.length - 1] = { ...last, content: last.content + event.text };
+          next[next.length - 1] = { ...last, content: last.content + text };
           return next;
         });
-      } else if (event.type === "done") {
+      } else if (tag === GENERATION_EVENT_TAG_DONE) {
         setIsGenerating(false);
         invoke<FlowStateInfo | null>("flow_status", { conversationId })
           .then(setActiveFlow)
           .catch((err) => setError(String(err)));
         onTurnComplete();
-      } else if (event.type === "error") {
-        setError(event.message);
-        toast.error(event.message);
+      } else if (tag === GENERATION_EVENT_TAG_ERROR) {
+        const message = textDecoder.decode(bytes.subarray(1));
+        setError(message);
+        toast.error(message);
         setIsGenerating(false);
       }
     };

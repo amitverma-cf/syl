@@ -1,8 +1,3 @@
-export type GenerationEvent =
-  | { type: "piece"; text: string }
-  | { type: "done" }
-  | { type: "error"; message: string };
-
 export interface StoredMessage {
   role: string;
   content: string;

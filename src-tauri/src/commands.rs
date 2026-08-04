@@ -9,7 +9,7 @@ use memory::{
     ToolPermissionDecision, ToolPermissionStore,
 };
 use plugin_registry::ModelKind;
-use tauri::ipc::Channel;
+use tauri::ipc::{Channel, Response};
 use tool::ToolExecutor;
 
 use crate::daemon::DaemonState;
@@ -47,12 +47,34 @@ pub fn grant_folder_access(
     Ok(())
 }
 
-#[derive(Clone, serde::Serialize)]
-#[serde(rename_all = "camelCase", tag = "type")]
-pub enum GenerationEvent {
-    Piece { text: String },
-    Done,
-    Error { message: String },
+/// Raw wire framing for streamed generation events: a one-byte tag followed by a
+/// UTF-8 payload (empty for `Done`). Sent as raw bytes through the IPC channel
+/// (`tauri::ipc::Response`) instead of a per-piece JSON envelope — pieces are by
+/// far the highest-frequency message on this channel (one per generated token),
+/// so skipping JSON serialize/parse on the hot path is the one wire-format
+/// optimization worth doing ahead of a profile.
+const GENERATION_EVENT_TAG_PIECE: u8 = 0;
+const GENERATION_EVENT_TAG_DONE: u8 = 1;
+const GENERATION_EVENT_TAG_ERROR: u8 = 2;
+
+fn send_generation_piece(on_event: &Channel<Response>, text: &str) {
+    let mut bytes = Vec::with_capacity(1 + text.len());
+    bytes.push(GENERATION_EVENT_TAG_PIECE);
+    bytes.extend_from_slice(text.as_bytes());
+    if let Err(err) = on_event.send(Response::new(bytes)) {
+        tracing::error!(?err, "failed to send piece to channel");
+    }
+}
+
+fn send_generation_done(on_event: &Channel<Response>) {
+    let _ = on_event.send(Response::new(vec![GENERATION_EVENT_TAG_DONE]));
+}
+
+fn send_generation_error(on_event: &Channel<Response>, message: &str) {
+    let mut bytes = Vec::with_capacity(1 + message.len());
+    bytes.push(GENERATION_EVENT_TAG_ERROR);
+    bytes.extend_from_slice(message.as_bytes());
+    let _ = on_event.send(Response::new(bytes));
 }
 
 #[tauri::command]
@@ -72,7 +94,7 @@ pub async fn generate(
     conversation_id: String,
     model: Option<String>,
     local_model: Option<String>,
-    on_event: Channel<GenerationEvent>,
+    on_event: Channel<Response>,
     state: tauri::State<'_, AppState>,
     tool_state: tauri::State<'_, ToolState>,
     flow_state: tauri::State<'_, FlowState>,
@@ -118,7 +140,7 @@ pub async fn generate(
                 &model_id,
                 &tool_specs,
                 &tool_state.executor,
-                move |piece| send_piece(&piece_event, piece),
+                move |piece| send_generation_piece(&piece_event, piece),
             )
             .await
         }
@@ -140,7 +162,7 @@ pub async fn generate(
                             &system_prompt,
                             &tool_specs,
                             &executor,
-                            move |piece| send_piece(&piece_event, piece),
+                            move |piece| send_generation_piece(&piece_event, piece),
                         )
                     })
                     .await
@@ -154,7 +176,7 @@ pub async fn generate(
                         &system_prompt,
                         &tool_specs,
                         &executor,
-                        move |piece| send_piece(&piece_event, piece),
+                        move |piece| send_generation_piece(&piece_event, piece),
                     )
                 })
                 .await
@@ -172,7 +194,7 @@ pub async fn generate(
                 &prompt_for_embed,
             )
             .await;
-            let _ = on_event.send(GenerationEvent::Done);
+            send_generation_done(&on_event);
             if let Some(info) = flow_state.advance(&conversation_id, "message") {
                 daemon_state
                     .event_bus
@@ -184,9 +206,7 @@ pub async fn generate(
         }
         Err(message) => {
             tracing::error!(%message, "generate failed");
-            let _ = on_event.send(GenerationEvent::Error {
-                message: message.clone(),
-            });
+            send_generation_error(&on_event, message);
         }
     }
     Ok(())
@@ -256,14 +276,6 @@ pub async fn generate_flow_draft(
             .await
             .map_err(|e| e.to_string())?
         }
-    }
-}
-
-fn send_piece(on_event: &Channel<GenerationEvent>, piece: &str) {
-    if let Err(err) = on_event.send(GenerationEvent::Piece {
-        text: piece.to_string(),
-    }) {
-        tracing::error!(?err, "failed to send piece to channel");
     }
 }
 
