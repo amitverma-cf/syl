@@ -14,8 +14,11 @@ pub enum MemoryError {
         #[source]
         source: std::io::Error,
     },
-    #[error("stored embedding has a corrupt length ({0} bytes, not a multiple of 4)")]
-    CorruptEmbedding(usize),
+    #[error(
+        "embedding dimension does not match this conversation's existing embeddings; \
+         mixing embedding models within one workspace is not supported"
+    )]
+    EmbeddingDimensionMismatch,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]

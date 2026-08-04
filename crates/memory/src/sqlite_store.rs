@@ -1,5 +1,5 @@
 use std::path::Path;
-use std::sync::Mutex;
+use std::sync::{Mutex, Once};
 
 use rusqlite::Connection;
 
@@ -22,15 +22,6 @@ const SCHEMA: &str = "
     );
     CREATE INDEX IF NOT EXISTS idx_messages_conversation
         ON messages (conversation_id, id);
-    CREATE TABLE IF NOT EXISTS embeddings (
-        id              INTEGER PRIMARY KEY AUTOINCREMENT,
-        conversation_id TEXT NOT NULL,
-        content         TEXT NOT NULL,
-        dims            INTEGER NOT NULL,
-        vector          BLOB NOT NULL
-    );
-    CREATE INDEX IF NOT EXISTS idx_embeddings_conversation
-        ON embeddings (conversation_id);
     CREATE TABLE IF NOT EXISTS tool_permissions (
         conversation_id TEXT NOT NULL,
         tool_name       TEXT NOT NULL,
@@ -46,8 +37,32 @@ const SCHEMA: &str = "
     );
 ";
 
+static REGISTER_SQLITE_VEC: Once = Once::new();
+
+/// Registers the `sqlite-vec` extension process-wide via `sqlite3_auto_extension`
+/// so every connection opened afterward (including this one) has `vec0` virtual
+/// tables and functions like `vec_distance_cosine` available — `Once` because
+/// SQLite already dedups repeated `sqlite3_auto_extension` calls with the same
+/// function pointer, but there's no reason to pay even that check on every
+/// `open`/`open_in_memory` call.
+fn register_sqlite_vec_extension() {
+    REGISTER_SQLITE_VEC.call_once(|| unsafe {
+        rusqlite::ffi::sqlite3_auto_extension(Some(std::mem::transmute::<
+            *const (),
+            unsafe extern "C" fn(
+                *mut rusqlite::ffi::sqlite3,
+                *mut *const std::ffi::c_char,
+                *const rusqlite::ffi::sqlite3_api_routines,
+            ) -> std::ffi::c_int,
+        >(
+            sqlite_vec::sqlite3_vec_init as *const ()
+        )));
+    });
+}
+
 impl SqliteConversationStore {
     pub fn open(db_path: &Path) -> Result<Self, MemoryError> {
+        register_sqlite_vec_extension();
         let conn = Connection::open(db_path)?;
         conn.execute_batch(SCHEMA)?;
         Ok(Self {
@@ -56,6 +71,7 @@ impl SqliteConversationStore {
     }
 
     pub fn open_in_memory() -> Result<Self, MemoryError> {
+        register_sqlite_vec_extension();
         let conn = Connection::open_in_memory()?;
         conn.execute_batch(SCHEMA)?;
         Ok(Self {
@@ -200,13 +216,43 @@ impl ConversationStore for SqliteConversationStore {
             .unwrap_or_else(|poisoned| poisoned.into_inner());
         conn.execute("DELETE FROM conversations WHERE id = ?1", (id,))?;
         conn.execute("DELETE FROM messages WHERE conversation_id = ?1", (id,))?;
-        conn.execute("DELETE FROM embeddings WHERE conversation_id = ?1", (id,))?;
+        // vec_embeddings is created lazily on first store_embedding call, so it
+        // may not exist yet — nothing to delete in that case.
+        let vec_table_exists: bool = conn.query_row(
+            "SELECT EXISTS(SELECT 1 FROM sqlite_master WHERE name = 'vec_embeddings')",
+            [],
+            |row| row.get(0),
+        )?;
+        if vec_table_exists {
+            conn.execute(
+                "DELETE FROM vec_embeddings WHERE conversation_id = ?1",
+                (id,),
+            )?;
+        }
         conn.execute(
             "DELETE FROM tool_permissions WHERE conversation_id = ?1",
             (id,),
         )?;
         Ok(())
     }
+}
+
+/// A `vec0` virtual table's vector column dimension is fixed at
+/// `CREATE VIRTUAL TABLE` time, so the table is created lazily on the first
+/// `store_embedding` call, sized to whatever dimension that first embedding
+/// has. A later embedding of a different dimension is rejected with a clear
+/// error rather than silently corrupting or truncating the vector — mixing
+/// embedding models within one workspace was never really meaningful for
+/// retrieval anyway (their vector spaces aren't comparable).
+fn ensure_vec_table(conn: &Connection, dims: usize) -> Result<(), MemoryError> {
+    conn.execute_batch(&format!(
+        "CREATE VIRTUAL TABLE IF NOT EXISTS vec_embeddings USING vec0(
+            conversation_id TEXT PARTITION KEY,
+            +content TEXT,
+            embedding FLOAT[{dims}]
+        )"
+    ))?;
+    Ok(())
 }
 
 impl EmbeddingStore for SqliteConversationStore {
@@ -220,16 +266,23 @@ impl EmbeddingStore for SqliteConversationStore {
             .conn
             .lock()
             .unwrap_or_else(|poisoned| poisoned.into_inner());
+        ensure_vec_table(&conn, embedding.len())?;
         conn.execute(
-            "INSERT INTO embeddings (conversation_id, content, dims, vector)
-             VALUES (?1, ?2, ?3, ?4)",
-            (
-                conversation_id,
-                content,
-                embedding.len() as i64,
-                encode_vector(embedding),
-            ),
-        )?;
+            "INSERT INTO vec_embeddings (conversation_id, content, embedding)
+             VALUES (?1, ?2, ?3)",
+            (conversation_id, content, encode_vector(embedding)),
+        )
+        .map_err(|source| {
+            // sqlite-vec reports a dimension mismatch as a generic SQLITE_ERROR
+            // (not a distinct error code), so the only reliable signal is its
+            // own error message text.
+            let is_dimension_mismatch = matches!(&source, rusqlite::Error::SqliteFailure(_, Some(msg)) if msg.contains("Dimension mismatch"));
+            if is_dimension_mismatch {
+                MemoryError::EmbeddingDimensionMismatch
+            } else {
+                MemoryError::Database(source)
+            }
+        })?;
         Ok(())
     }
 
@@ -243,25 +296,43 @@ impl EmbeddingStore for SqliteConversationStore {
             .conn
             .lock()
             .unwrap_or_else(|poisoned| poisoned.into_inner());
-        let mut stmt =
-            conn.prepare("SELECT content, vector FROM embeddings WHERE conversation_id = ?1")?;
-        let rows = stmt.query_map((conversation_id,), |row| {
-            let content: String = row.get(0)?;
-            let vector: Vec<u8> = row.get(1)?;
-            Ok((content, vector))
-        })?;
 
-        let mut scored = Vec::new();
-        for row in rows {
-            let (content, raw) = row?;
-            let vector = decode_vector(&raw)?;
-            let score = cosine_similarity(query, &vector);
-            scored.push(EmbeddingMatch { content, score });
+        // No `vec_embeddings` table yet means nothing has ever been stored in
+        // this store — a real "no matches" case, not an error.
+        let table_exists: bool = conn.query_row(
+            "SELECT EXISTS(SELECT 1 FROM sqlite_master WHERE name = 'vec_embeddings')",
+            [],
+            |row| row.get(0),
+        )?;
+        if !table_exists {
+            return Ok(Vec::new());
         }
 
-        scored.sort_by(|a, b| b.score.total_cmp(&a.score));
-        scored.truncate(top_k);
-        Ok(scored)
+        // A "full scan" KNN query (ranking by vec_distance_cosine directly,
+        // rather than the indexed `embedding MATCH ?` form) — appropriate at
+        // per-conversation scale, and lets a plain `WHERE conversation_id = ?`
+        // filter combine naturally with ORDER BY/LIMIT.
+        let mut stmt = conn.prepare(
+            "SELECT content, vec_distance_cosine(embedding, ?1) AS distance
+             FROM vec_embeddings
+             WHERE conversation_id = ?2
+             ORDER BY distance ASC
+             LIMIT ?3",
+        )?;
+        let rows = stmt.query_map(
+            (encode_vector(query), conversation_id, top_k as i64),
+            |row| {
+                let content: String = row.get(0)?;
+                let distance: f32 = row.get(1)?;
+                Ok(EmbeddingMatch {
+                    content,
+                    score: 1.0 - distance,
+                })
+            },
+        )?;
+
+        rows.collect::<Result<Vec<_>, _>>()
+            .map_err(MemoryError::Database)
     }
 }
 
@@ -360,26 +431,11 @@ impl ToolPermissionStore for SqliteConversationStore {
     }
 }
 
+/// `vec0` accepts a `float[N]` column value as its raw little-endian byte
+/// layout directly, so this is also the wire format `store_embedding`/
+/// `search_similar` pass across the FFI boundary — no separate decode step
+/// needed on the read side since `sqlite-vec`'s own functions operate on
+/// this layout internally.
 fn encode_vector(vector: &[f32]) -> Vec<u8> {
     vector.iter().flat_map(|f| f.to_le_bytes()).collect()
-}
-
-fn decode_vector(raw: &[u8]) -> Result<Vec<f32>, MemoryError> {
-    if !raw.len().is_multiple_of(4) {
-        return Err(MemoryError::CorruptEmbedding(raw.len()));
-    }
-    Ok(raw
-        .chunks_exact(4)
-        .map(|chunk| f32::from_le_bytes([chunk[0], chunk[1], chunk[2], chunk[3]]))
-        .collect())
-}
-
-fn cosine_similarity(a: &[f32], b: &[f32]) -> f32 {
-    let dot: f32 = a.iter().zip(b).map(|(x, y)| x * y).sum();
-    let norm_a: f32 = a.iter().map(|x| x * x).sum::<f32>().sqrt();
-    let norm_b: f32 = b.iter().map(|x| x * x).sum::<f32>().sqrt();
-    if norm_a == 0.0 || norm_b == 0.0 {
-        return 0.0;
-    }
-    dot / (norm_a * norm_b)
 }

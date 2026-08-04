@@ -1,4 +1,4 @@
-use memory::{EmbeddingStore, SqliteConversationStore};
+use memory::{EmbeddingStore, MemoryError, SqliteConversationStore};
 
 #[test]
 fn search_similar_ranks_the_closest_vector_first() {
@@ -62,4 +62,17 @@ fn search_similar_on_empty_conversation_returns_empty() {
         .search_similar("does-not-exist", &[1.0, 0.0], 5)
         .unwrap();
     assert!(results.is_empty());
+}
+
+#[test]
+fn storing_an_embedding_of_a_different_dimension_is_rejected() {
+    let store = SqliteConversationStore::open_in_memory().unwrap();
+    store
+        .store_embedding("c1", "first embedding, 3 dims", &[1.0, 0.0, 0.0])
+        .unwrap();
+
+    let err = store
+        .store_embedding("c1", "second embedding, 2 dims", &[1.0, 0.0])
+        .unwrap_err();
+    assert!(matches!(err, MemoryError::EmbeddingDimensionMismatch));
 }
