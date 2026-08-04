@@ -129,6 +129,20 @@ function ChatPanel({
     };
   }, []);
 
+  useEffect(() => {
+    const unlisten = listen<number>("tool-permission-timeout", (event) => {
+      setPermissionRequest((current) =>
+        current?.requestId === event.payload ? null : current,
+      );
+      toast.error("Permission request timed out and was denied", {
+        description: "No answer was given in time.",
+      });
+    });
+    return () => {
+      unlisten.then((fn) => fn());
+    };
+  }, []);
+
   async function respondToPermission(response: "allowOnce" | "allowAlways" | "deny" | "denyAlways") {
     if (!permissionRequest) return;
     try {
@@ -423,6 +437,16 @@ function ChatPanel({
       {noChatModel && (
         <div className="empty-state" style={{ flex: "none", padding: "8px 18px" }}>
           <span>No chat model set up yet — download one from Settings.</span>
+        </div>
+      )}
+      {isGenerating && (
+        <div
+          data-testid="generation-status"
+          style={{ padding: "0 18px", fontSize: 11.5, color: permissionRequest ? "#e3b341" : "var(--text-3)" }}
+        >
+          {permissionRequest
+            ? "Waiting for your answer to the permission request above…"
+            : "Generating…"}
         </div>
       )}
 

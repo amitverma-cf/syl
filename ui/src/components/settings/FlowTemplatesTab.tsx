@@ -1,5 +1,6 @@
 import { useEffect, useState } from "react";
 import { invoke } from "@tauri-apps/api/core";
+import { Button } from "../ui";
 import type { FlowStateInfo } from "../../types";
 
 interface FlowTemplatesTabProps {
@@ -39,35 +40,32 @@ function FlowTemplatesTab({ activeConversationId }: FlowTemplatesTabProps) {
   }
 
   return (
-    <div className="flex flex-col gap-2">
-      <h2 className="text-sm font-medium">Flow templates</h2>
-      <p className="text-xs text-neutral-500">
-        Flow files in <span className="font-mono">.syl/flows/</span>. Selecting one here switches
-        the currently open conversation to that flow.
+    <div>
+      <div className="settings-section-title" style={{ marginTop: 0 }}>
+        Flow templates
+      </div>
+      <p style={{ fontSize: 11.5, color: "var(--text-3)", margin: "0 0 10px", lineHeight: 1.5 }}>
+        Flow files in <code>.syl/flows/</code>. Selecting one here switches the currently open
+        conversation to that flow.
       </p>
       {!activeConversationId && (
-        <p className="text-sm text-neutral-500">Open a conversation to change its flow.</p>
+        <p style={{ fontSize: 12, color: "var(--text-3)" }}>Open a conversation to change its flow.</p>
       )}
       {activeFlow && (
-        <p className="text-sm">
-          Active: <span className="font-mono">{activeFlow.flowName}</span> in state{" "}
-          <span className="font-mono text-emerald-400">{activeFlow.stateName}</span>
+        <p style={{ fontSize: 12.5, color: "var(--text-1)", margin: "0 0 10px" }}>
+          Active: <code>{activeFlow.flowName}</code> in state{" "}
+          <code style={{ color: "var(--accent)" }}>{activeFlow.stateName}</code>
         </p>
       )}
-      <div className="flex flex-wrap gap-2">
-        {flows.length === 0 && <p className="text-sm text-neutral-500">No flows in .syl/flows yet.</p>}
+      <div style={{ display: "flex", flexWrap: "wrap", gap: 8 }}>
+        {flows.length === 0 && <p style={{ fontSize: 12, color: "var(--text-3)" }}>No flows in .syl/flows yet.</p>}
         {flows.map((name) => (
-          <button
-            key={name}
-            onClick={() => handleLoad(name)}
-            disabled={!activeConversationId}
-            className="rounded bg-neutral-100 px-2 py-1 text-xs font-medium text-neutral-950 disabled:opacity-50"
-          >
+          <Button key={name} onClick={() => handleLoad(name)} disabled={!activeConversationId}>
             Use {name}
-          </button>
+          </Button>
         ))}
       </div>
-      {error && <p className="text-sm text-red-400">{error}</p>}
+      {error && <p className="settings-error">{error}</p>}
     </div>
   );
 }

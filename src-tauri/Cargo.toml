@@ -39,3 +39,6 @@ tokio-cron-scheduler.workspace = true
 uuid.workspace = true
 base64.workspace = true
 cpal.workspace = true
+
+[dev-dependencies]
+tokio = { version = "1", features = ["test-util"] }
