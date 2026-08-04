@@ -40,6 +40,7 @@ pub struct AppConfig {
     pub registry_poll_url: String,
     pub registry_allowed_hosts: Vec<String>,
     pub max_tool_iterations: u32,
+    pub context_budget_chars: usize,
     pub local_engine: LocalEngineConfig,
     pub sd_engine: SdEngineConfig,
     pub onnx_engine: OnnxEngineConfig,

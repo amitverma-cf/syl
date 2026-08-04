@@ -25,6 +25,10 @@ impl OnnxModelState {
     pub fn remove_loaded(&self, name: &str) {
         crate::sync::lock(&self.loaded).remove(name);
     }
+
+    pub fn any_loaded(&self) -> Option<Arc<Mutex<OnnxEmbeddingEngine>>> {
+        crate::sync::lock(&self.loaded).values().next().cloned()
+    }
 }
 
 #[tauri::command]

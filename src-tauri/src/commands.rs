@@ -5,7 +5,7 @@ use core_types::workspace_paths;
 use daemon::events::DaemonEvent;
 use engine_host::llama::LlamaEngine;
 use memory::{
-    ConversationStore, ConversationSummary, Message, SqliteConversationStore,
+    ConversationStore, ConversationSummary, EmbeddingStore, Message, SqliteConversationStore,
     ToolPermissionDecision, ToolPermissionStore,
 };
 use plugin_registry::ModelKind;
@@ -13,6 +13,7 @@ use tauri::ipc::Channel;
 use tool::ToolExecutor;
 
 use crate::daemon::DaemonState;
+use crate::embeddings::OnnxModelState;
 use crate::flows::{default_flow_name, FlowState, WorkspaceFolderState};
 use crate::local_models::LocalModelState;
 use crate::{AppState, ToolState};
@@ -63,7 +64,8 @@ pub enum GenerationEvent {
     flow_state,
     daemon_state,
     local_model_state,
-    workspace_folder
+    workspace_folder,
+    onnx_state
 ))]
 pub async fn generate(
     prompt: String,
@@ -77,6 +79,7 @@ pub async fn generate(
     daemon_state: tauri::State<'_, DaemonState>,
     local_model_state: tauri::State<'_, LocalModelState>,
     workspace_folder: tauri::State<'_, WorkspaceFolderState>,
+    onnx_state: tauri::State<'_, OnnxModelState>,
 ) -> Result<(), String> {
     let store = state.conversation_store.clone();
 
@@ -94,7 +97,14 @@ pub async fn generate(
         "generate turn starting"
     );
 
+    let mut effective_system_prompt = flow_turn.system_prompt.clone();
+    effective_system_prompt.push_str(&compressed_history_block(&store, &conversation_id));
+    effective_system_prompt
+        .push_str(&retrieved_context_block(&store, &onnx_state, &conversation_id, &prompt).await);
+
     let conversation_id_for_store = conversation_id.clone();
+    let store_for_embed = store.clone();
+    let prompt_for_embed = prompt.clone();
     let cloud_model = model.filter(|m| !m.is_empty());
     let local_model_name = local_model.filter(|m| !m.is_empty());
     let piece_event = on_event.clone();
@@ -104,7 +114,7 @@ pub async fn generate(
                 &store,
                 &conversation_id_for_store,
                 &prompt,
-                &flow_turn.system_prompt,
+                &effective_system_prompt,
                 &model_id,
                 &tool_specs,
                 &tool_state.executor,
@@ -114,7 +124,7 @@ pub async fn generate(
         }
         None => {
             let executor = tool_state.executor.clone();
-            let system_prompt = flow_turn.system_prompt.clone();
+            let system_prompt = effective_system_prompt.clone();
             match local_model_name {
                 Some(name) => {
                     let engine = local_model_state.get_loaded(&name).ok_or_else(|| {
@@ -155,6 +165,13 @@ pub async fn generate(
 
     match &generation_result {
         Ok(()) => {
+            store_prompt_embedding(
+                &store_for_embed,
+                &onnx_state,
+                &conversation_id,
+                &prompt_for_embed,
+            )
+            .await;
             let _ = on_event.send(GenerationEvent::Done);
             if let Some(info) = flow_state.advance(&conversation_id, "message") {
                 daemon_state
@@ -379,6 +396,110 @@ pub fn clear_tool_permission(
         .map_err(|e| e.to_string())
 }
 
+/// Folds recent conversation history into the prompt, keeping the most recent
+/// messages within `contextBudgetChars` (older messages are dropped first, per
+/// `tool::compress_context`) — a real character budget instead of sending the
+/// whole conversation unbounded on every turn.
+fn compressed_history_block(store: &Arc<SqliteConversationStore>, conversation_id: &str) -> String {
+    let messages = store.list_messages(conversation_id).unwrap_or_default();
+    let budget = app_config().context_budget_chars;
+    let compressed = tool::compress_context(&messages, budget);
+    if compressed.is_empty() {
+        return String::new();
+    }
+    let mut block = String::from("\n\nConversation history so far:\n");
+    for message in &compressed {
+        block.push_str(&format!("{}: {}\n", message.role, message.content));
+    }
+    block
+}
+
+/// Retrieves the most semantically relevant earlier messages in this conversation
+/// via the loaded embedding model, if any — degrades gracefully (returns an empty
+/// block) when no embedding model is loaded, matching the existing "no chat model
+/// yet" graceful-degradation pattern elsewhere in this file.
+async fn retrieved_context_block(
+    store: &Arc<SqliteConversationStore>,
+    onnx_state: &tauri::State<'_, OnnxModelState>,
+    conversation_id: &str,
+    prompt: &str,
+) -> String {
+    let Some(engine) = onnx_state.any_loaded() else {
+        tracing::debug!("no embedding model loaded; skipping RAG retrieval");
+        return String::new();
+    };
+
+    let prompt_owned = prompt.to_string();
+    let embedding = match tauri::async_runtime::spawn_blocking(move || {
+        let mut engine = crate::sync::lock(&engine);
+        engine.embed(&prompt_owned)
+    })
+    .await
+    {
+        Ok(Ok(embedding)) => embedding,
+        _ => {
+            tracing::debug!("failed to embed prompt for RAG retrieval; skipping");
+            return String::new();
+        }
+    };
+
+    let store = store.clone();
+    let conversation_id_owned = conversation_id.to_string();
+    let matches = match tauri::async_runtime::spawn_blocking(move || {
+        store.search_similar(&conversation_id_owned, &embedding, 3)
+    })
+    .await
+    {
+        Ok(Ok(matches)) => matches,
+        _ => {
+            tracing::debug!("RAG similarity search failed; skipping");
+            return String::new();
+        }
+    };
+
+    if matches.is_empty() {
+        return String::new();
+    }
+    let mut block =
+        String::from("\n\nRelevant context retrieved from earlier in this conversation:\n");
+    for m in &matches {
+        block.push_str(&format!("- {}\n", m.content));
+    }
+    block
+}
+
+/// Embeds and stores the just-sent prompt so future turns can retrieve it via
+/// `retrieved_context_block`. Best-effort: silently skips when no embedding model
+/// is loaded, and logs (rather than fails the turn) on embedding/store errors.
+async fn store_prompt_embedding(
+    store: &Arc<SqliteConversationStore>,
+    onnx_state: &tauri::State<'_, OnnxModelState>,
+    conversation_id: &str,
+    prompt: &str,
+) {
+    let Some(engine) = onnx_state.any_loaded() else {
+        return;
+    };
+    let store = store.clone();
+    let conversation_id_owned = conversation_id.to_string();
+    let prompt_owned = prompt.to_string();
+    let result = tauri::async_runtime::spawn_blocking(move || {
+        let embedding = {
+            let mut engine = crate::sync::lock(&engine);
+            engine.embed(&prompt_owned).map_err(|e| e.to_string())?
+        };
+        store
+            .store_embedding(&conversation_id_owned, &prompt_owned, &embedding)
+            .map_err(|e| e.to_string())
+    })
+    .await;
+    match result {
+        Err(err) => tracing::warn!(?err, "failed to join embedding-store task"),
+        Ok(Err(err)) => tracing::warn!(%err, "failed to store prompt embedding"),
+        Ok(Ok(())) => {}
+    }
+}
+
 #[tracing::instrument(skip(store, tools, executor, on_piece))]
 #[allow(clippy::too_many_arguments)]
 pub(crate) async fn run_generate_cloud(
@@ -499,4 +620,44 @@ pub(crate) fn run_generate_with_engine(
         .append_message(conversation_id, "assistant", &response)
         .map_err(|e| e.to_string())?;
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn compressed_history_block_is_empty_for_a_conversation_with_no_messages() {
+        let store = Arc::new(SqliteConversationStore::open_in_memory().unwrap());
+        store.create_conversation("c1", "test", "default").unwrap();
+        assert_eq!(compressed_history_block(&store, "c1"), "");
+    }
+
+    #[test]
+    fn compressed_history_block_includes_every_message_within_budget() {
+        let store = Arc::new(SqliteConversationStore::open_in_memory().unwrap());
+        store.create_conversation("c1", "test", "default").unwrap();
+        store.append_message("c1", "user", "hello").unwrap();
+        store.append_message("c1", "assistant", "hi there").unwrap();
+
+        let block = compressed_history_block(&store, "c1");
+        assert!(block.contains("user: hello"));
+        assert!(block.contains("assistant: hi there"));
+    }
+
+    #[test]
+    fn compressed_history_block_drops_the_oldest_message_once_over_budget() {
+        let store = Arc::new(SqliteConversationStore::open_in_memory().unwrap());
+        store.create_conversation("c1", "test", "default").unwrap();
+        store
+            .append_message("c1", "user", &"a".repeat(8000))
+            .unwrap();
+        store
+            .append_message("c1", "assistant", &"b".repeat(8000))
+            .unwrap();
+
+        let block = compressed_history_block(&store, "c1");
+        assert!(!block.contains(&"a".repeat(8000)));
+        assert!(block.contains(&"b".repeat(8000)));
+    }
 }
