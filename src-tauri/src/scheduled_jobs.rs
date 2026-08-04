@@ -15,7 +15,7 @@ use tauri::{AppHandle, Manager};
 
 use crate::commands::{run_generate, run_generate_cloud, run_generate_with_engine};
 use crate::daemon::DaemonState;
-use crate::flows::{default_flow_name, FlowState};
+use crate::flows::{default_flow_name, FlowState, WorkspaceFolderState};
 use crate::local_models::LocalModelState;
 use crate::{AppState, ToolState};
 
@@ -73,6 +73,7 @@ async fn fire_job(app: AppHandle, job: ScheduledJob) {
     let flow_state = app.state::<FlowState>();
     let daemon_state = app.state::<DaemonState>();
     let local_model_state = app.state::<LocalModelState>();
+    let workspace_folder = app.state::<WorkspaceFolderState>();
 
     let _ = app_state.conversation_store.create_conversation(
         &job.conversation_id,
@@ -85,6 +86,7 @@ async fn fire_job(app: AppHandle, job: ScheduledJob) {
         &tool_state,
         &flow_state,
         &local_model_state,
+        &workspace_folder,
         &job,
     )
     .await;
@@ -114,10 +116,11 @@ async fn fire_turn(
     tool_state: &tauri::State<'_, ToolState>,
     flow_state: &tauri::State<'_, FlowState>,
     local_model_state: &tauri::State<'_, LocalModelState>,
+    workspace_folder: &tauri::State<'_, WorkspaceFolderState>,
     job: &ScheduledJob,
 ) -> Result<(), String> {
     let store = app_state.conversation_store.clone();
-    let flow_turn = flow_state.ensure_and_take_turn(&job.conversation_id)?;
+    let flow_turn = flow_state.ensure_and_take_turn(&job.conversation_id, workspace_folder)?;
     let tools = tool_state
         .executor
         .tool_specs_filtered(&flow_turn.tool_allowlist);

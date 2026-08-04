@@ -94,6 +94,7 @@ pub fn run() {
             app.manage(observability_state);
 
             app.manage(flows::FlowState::default());
+            app.manage(flows::WorkspaceFolderState::default());
             app.manage(local_models::LocalModelState::default());
             app.manage(images::SdModelState::default());
             app.manage(embeddings::OnnxModelState::default());

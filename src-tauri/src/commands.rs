@@ -13,7 +13,7 @@ use tauri::ipc::Channel;
 use tool::ToolExecutor;
 
 use crate::daemon::DaemonState;
-use crate::flows::{default_flow_name, FlowState};
+use crate::flows::{default_flow_name, FlowState, WorkspaceFolderState};
 use crate::local_models::LocalModelState;
 use crate::{AppState, ToolState};
 
@@ -33,11 +33,17 @@ pub fn quit_app(app: tauri::AppHandle) {
 /// user-chosen folder, scoped to exactly what they picked rather than the
 /// whole disk.
 #[tauri::command]
-pub fn grant_folder_access(path: String, app: tauri::AppHandle) -> Result<(), String> {
+pub fn grant_folder_access(
+    path: String,
+    app: tauri::AppHandle,
+    workspace_folder: tauri::State<'_, WorkspaceFolderState>,
+) -> Result<(), String> {
     use tauri_plugin_fs::FsExt;
     app.fs_scope()
         .allow_directory(&path, true)
-        .map_err(|e| e.to_string())
+        .map_err(|e| e.to_string())?;
+    workspace_folder.set(std::path::PathBuf::from(&path));
+    Ok(())
 }
 
 #[derive(Clone, serde::Serialize)]
@@ -56,7 +62,8 @@ pub enum GenerationEvent {
     tool_state,
     flow_state,
     daemon_state,
-    local_model_state
+    local_model_state,
+    workspace_folder
 ))]
 pub async fn generate(
     prompt: String,
@@ -69,10 +76,11 @@ pub async fn generate(
     flow_state: tauri::State<'_, FlowState>,
     daemon_state: tauri::State<'_, DaemonState>,
     local_model_state: tauri::State<'_, LocalModelState>,
+    workspace_folder: tauri::State<'_, WorkspaceFolderState>,
 ) -> Result<(), String> {
     let store = state.conversation_store.clone();
 
-    let flow_turn = flow_state.ensure_and_take_turn(&conversation_id)?;
+    let flow_turn = flow_state.ensure_and_take_turn(&conversation_id, &workspace_folder)?;
     let tool_specs = tool_state
         .executor
         .tool_specs_filtered(&flow_turn.tool_allowlist);
