@@ -1,6 +1,7 @@
 mod audio;
 mod bootstrap;
 mod commands;
+mod contributions;
 mod daemon;
 mod embeddings;
 mod flows;
@@ -107,8 +108,16 @@ pub fn run() {
             app.manage(speech::OnnxTtsState::default());
 
             app.manage(DaemonState::default());
+            let event_bus = app.state::<DaemonState>().event_bus.clone();
             app.state::<local_models::LocalModelState>()
-                .set_event_bus(app.state::<DaemonState>().event_bus.clone());
+                .set_event_bus(event_bus.clone());
+            app.state::<images::SdModelState>()
+                .set_event_bus(event_bus.clone());
+            app.state::<embeddings::OnnxModelState>()
+                .set_event_bus(event_bus.clone());
+            app.state::<speech::OnnxAsrState>()
+                .set_event_bus(event_bus.clone());
+            app.state::<speech::OnnxTtsState>().set_event_bus(event_bus);
             tauri::async_runtime::spawn(daemon::spawn(app.handle().clone()));
 
             let show_item = MenuItem::with_id(app, "show", "Show", true, None::<&str>)?;
@@ -168,6 +177,7 @@ pub fn run() {
             speech::transcribe_recording,
             speech::speak_text,
             observability::system_stats,
+            contributions::list_contributions,
             flows::list_flows,
             flows::load_flow,
             flows::flow_status,

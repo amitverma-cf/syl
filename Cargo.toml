@@ -11,6 +11,10 @@ members = [
     "crates/plugin-registry",
     "crates/extension-host",
     "crates/engine-worker",
+    "crates/sd-worker",
+    "crates/embedding-worker",
+    "crates/asr-worker",
+    "crates/tts-worker",
     "src-tauri",
 ]
 

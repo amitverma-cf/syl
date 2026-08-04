@@ -36,7 +36,7 @@ fn parses_a_valid_two_state_flow() {
 #[test]
 fn rejects_malformed_json() {
     let err = parse_flow(b"{not json").unwrap_err();
-    assert!(matches!(err, FlowError::SimdJson(_)));
+    assert!(matches!(err, FlowError::Json(_)));
 }
 
 #[test]

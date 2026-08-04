@@ -7,10 +7,10 @@ fn fixture_manifest() -> ExtensionManifest {
         id: "fixture".to_string(),
         version: "1.0.0".to_string(),
         display_name: "Fixture Extension".to_string(),
-        backend: ExtensionBackend {
+        backend: Some(ExtensionBackend {
             command: env!("CARGO_BIN_EXE_fixture_extension").to_string(),
             args: vec![],
-        },
+        }),
         provides: vec!["inference.chat/v1".to_string()],
         requires: vec![],
         contributes: None,

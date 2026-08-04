@@ -38,7 +38,7 @@ async fn spawn_real_engine_worker() -> std::sync::Arc<ExtensionProcess> {
         id: "llama-cpp-chat".to_string(),
         version: "1.0.0".to_string(),
         display_name: "llama.cpp Chat Engine".to_string(),
-        backend: ExtensionBackend {
+        backend: Some(ExtensionBackend {
             command: env!("CARGO_BIN_EXE_engine-worker").to_string(),
             args: vec![
                 "--library".to_string(),
@@ -48,7 +48,7 @@ async fn spawn_real_engine_worker() -> std::sync::Arc<ExtensionProcess> {
                 "--n-ctx".to_string(),
                 "2048".to_string(),
             ],
-        },
+        }),
         provides: vec!["inference.chat/v1".to_string()],
         requires: vec![],
         contributes: None,

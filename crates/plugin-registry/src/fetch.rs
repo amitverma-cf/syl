@@ -172,6 +172,20 @@ pub fn fetch_remote_registry(base_url: &str) -> Result<(String, String), PluginR
     Ok((engines, models))
 }
 
+/// Fetches the detached hex signatures published alongside `engines.json`/
+/// `models.json` — small, always fetched fresh (no ETag caching, unlike the
+/// manifests themselves) so a signature check is against the exact bytes
+/// just validated, whether they came from a fresh poll or an unchanged
+/// on-disk read.
+pub fn fetch_registry_signatures(base_url: &str) -> Result<(String, String), PluginRegistryError> {
+    let engines_sig = fetch_text(&format!("{base_url}/engines.json.sig"))?;
+    let models_sig = fetch_text(&format!("{base_url}/models.json.sig"))?;
+    Ok((
+        engines_sig.trim().to_string(),
+        models_sig.trim().to_string(),
+    ))
+}
+
 fn fetch_text(url: &str) -> Result<String, PluginRegistryError> {
     let response = ureq::get(url).call().map_err(|err| to_error(url, err))?;
     response

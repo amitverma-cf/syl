@@ -39,6 +39,8 @@ pub enum ExtensionProcessError {
     Timeout(std::time::Duration),
     #[error("too many in-flight requests to this extension ({MAX_PENDING_REQUESTS} max)")]
     TooManyPendingRequests,
+    #[error("extension {0:?} has no backend process to spawn (it's a UI-only extension)")]
+    NoBackend(String),
 }
 
 /// How long a single request (`initialize`, `countTokens`, or one `generate`
@@ -103,9 +105,14 @@ impl ExtensionProcess {
         check_requirements(&manifest.requires)
             .map_err(|e| ExtensionProcessError::UnsupportedRequirement(manifest.id.clone(), e))?;
 
-        let mut command = Command::new(&manifest.backend.command);
+        let backend = manifest
+            .backend
+            .clone()
+            .ok_or_else(|| ExtensionProcessError::NoBackend(manifest.id.clone()))?;
+
+        let mut command = Command::new(&backend.command);
         command
-            .args(&manifest.backend.args)
+            .args(&backend.args)
             .stdin(std::process::Stdio::piped())
             .stdout(std::process::Stdio::piped())
             .stderr(std::process::Stdio::piped());
@@ -181,6 +188,25 @@ impl ExtensionProcess {
 
     pub fn provides(&self, capability: &str) -> bool {
         self.manifest.provides.iter().any(|c| c == capability)
+    }
+
+    /// Generic, capability-gated one-shot call — the entry point for every
+    /// non-chat extension (image generation, embeddings, ASR, TTS): each
+    /// gets its own capability id and method name instead of a bespoke Rust
+    /// method per capability. `generate()` stays separate since it's the
+    /// only streaming/notification-based call.
+    pub async fn call(
+        &self,
+        capability: &str,
+        method: &str,
+        params: Value,
+    ) -> Result<Value, ExtensionProcessError> {
+        if !self.provides(capability) {
+            return Err(ExtensionProcessError::CapabilityNotProvided(
+                capability.to_string(),
+            ));
+        }
+        self.request(method, params).await
     }
 
     /// Sends a request and waits for its single JSON response — used for

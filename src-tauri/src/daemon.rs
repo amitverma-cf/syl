@@ -114,23 +114,43 @@ async fn poll_registry(event_bus: Arc<EventBus>) {
             None => read_current(&registry_dir, "models.json")?,
         };
 
-        // Validate (host-allowlisted URLs, safe library_file paths) and atomically
-        // persist only if the whole fetched pair passes — a poll that fails
-        // validation, or a network/parse error, leaves the last-known-good registry
-        // files exactly as they were, so a compromised or malformed response can
-        // never partially or fully overwrite what's already trusted.
-        // Signature verification is wired end to end (see plugin_registry::signing)
-        // but not yet enabled here: no real Ed25519 keypair has been provisioned or
-        // wired into a publish pipeline for the actual registryPollUrl yet, so
-        // requiring one today would just break every real poll. Pass real
-        // signatures once `examples/sign_registry.rs` is run against a real
-        // publish and the resulting public key is set in config/app.json.
+        // Signature verification (provenance) is enabled whenever a public key is
+        // configured — fetched fresh alongside the manifests, verified against the
+        // exact bytes about to be validated/persisted, on top of the existing
+        // sha256/host-allowlist checks (integrity), which apply_remote_registry
+        // still runs regardless.
+        let public_key_hex = app_config().registry_manifest_public_key.clone();
+        let signatures = public_key_hex
+            .as_deref()
+            .map(|public_key_hex| {
+                plugin_registry::fetch_registry_signatures(&app_config().registry_poll_url).map(
+                    |(engines_sig, models_sig)| {
+                        (public_key_hex.to_string(), engines_sig, models_sig)
+                    },
+                )
+            })
+            .transpose()?;
+
+        // Validate (host-allowlisted URLs, safe library_file paths, and — when a
+        // public key is configured — a valid Ed25519 signature over each file) and
+        // atomically persist only if the whole fetched pair passes — a poll that
+        // fails validation, or a network/parse error, leaves the last-known-good
+        // registry files exactly as they were, so a compromised or malformed
+        // response can never partially or fully overwrite what's already trusted.
         plugin_registry::apply_remote_registry(
             &registry_dir,
             &engines_json,
             &models_json,
             &app_config().registry_allowed_hosts,
-            None,
+            signatures
+                .as_ref()
+                .map(|(public_key_hex, engines_sig, models_sig)| {
+                    plugin_registry::RegistrySignatures {
+                        public_key_hex,
+                        engines_signature_hex: engines_sig,
+                        models_signature_hex: models_sig,
+                    }
+                }),
         )?;
 
         if let Some(etag) = &poll.engines_etag {

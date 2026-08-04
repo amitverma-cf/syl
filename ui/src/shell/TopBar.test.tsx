@@ -1,8 +1,19 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
-import { render, screen, fireEvent } from "@testing-library/react";
+import { render, screen, fireEvent, waitFor } from "@testing-library/react";
+
+const invokeMock = vi.hoisted(() => vi.fn());
+vi.mock("@tauri-apps/api/core", () => ({ invoke: invokeMock }));
+
 import { useShellStore } from "../store/shellStore";
 import TopBar from "./TopBar";
 import type { ConversationSummary } from "../types";
+
+const FLOW_EDITOR_CONTRIBUTION = {
+  extensionId: "flow-editor",
+  kind: "sidebarView",
+  id: "flow-editor",
+  title: "Flow Editor",
+};
 
 const conv = (id: string, title: string): ConversationSummary => ({
   id,
@@ -26,7 +37,11 @@ function resetStore() {
 }
 
 describe("TopBar", () => {
-  beforeEach(resetStore);
+  beforeEach(() => {
+    resetStore();
+    invokeMock.mockReset();
+    invokeMock.mockResolvedValue([FLOW_EDITOR_CONTRIBUTION]);
+  });
 
   it("shows the app title and no tabs when nothing is open", () => {
     render(<TopBar conversations={[]} onNewChat={vi.fn()} onOpenFlowEditor={vi.fn()} />);
@@ -91,9 +106,10 @@ describe("TopBar", () => {
     expect(onNewChat).toHaveBeenCalledTimes(1);
   });
 
-  it("clicking the flow editor icon calls onOpenFlowEditor", () => {
+  it("clicking the flow editor icon calls onOpenFlowEditor", async () => {
     const onOpenFlowEditor = vi.fn();
     render(<TopBar conversations={[]} onNewChat={vi.fn()} onOpenFlowEditor={onOpenFlowEditor} />);
+    await waitFor(() => expect(screen.getByTitle("Open flow editor")).toBeInTheDocument());
     fireEvent.click(screen.getByTitle("Open flow editor"));
     expect(onOpenFlowEditor).toHaveBeenCalledTimes(1);
   });

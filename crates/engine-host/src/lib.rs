@@ -1,4 +1,3 @@
-pub mod batching;
 mod dll;
 pub mod gguf_meta;
 pub mod llama;

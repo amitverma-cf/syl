@@ -427,20 +427,24 @@ async fn retrieved_context_block(
     conversation_id: &str,
     prompt: &str,
 ) -> String {
-    let Some(engine) = onnx_state.any_loaded() else {
+    let Some(process) = onnx_state.any_loaded() else {
         tracing::debug!("no embedding model loaded; skipping RAG retrieval");
         return String::new();
     };
 
-    let prompt_owned = prompt.to_string();
-    let embedding = match tauri::async_runtime::spawn_blocking(move || {
-        let mut engine = crate::sync::lock(&engine);
-        engine.embed(&prompt_owned)
-    })
-    .await
+    let embedding = match process
+        .call(
+            "embedding.embed/v1",
+            "embedding/embed",
+            serde_json::json!({ "text": prompt }),
+        )
+        .await
+        .ok()
+        .and_then(|result| result.get("vector").cloned())
+        .and_then(|value| serde_json::from_value::<Vec<f32>>(value).ok())
     {
-        Ok(Ok(embedding)) => embedding,
-        _ => {
+        Some(embedding) => embedding,
+        None => {
             tracing::debug!("failed to embed prompt for RAG retrieval; skipping");
             return String::new();
         }
@@ -480,17 +484,35 @@ async fn store_prompt_embedding(
     conversation_id: &str,
     prompt: &str,
 ) {
-    let Some(engine) = onnx_state.any_loaded() else {
+    let Some(process) = onnx_state.any_loaded() else {
         return;
+    };
+    let embedding = match process
+        .call(
+            "embedding.embed/v1",
+            "embedding/embed",
+            serde_json::json!({ "text": prompt }),
+        )
+        .await
+        .map_err(|e| e.to_string())
+        .and_then(|result| {
+            result
+                .get("vector")
+                .cloned()
+                .ok_or_else(|| "embedding-worker response missing vector".to_string())
+        })
+        .and_then(|value| serde_json::from_value::<Vec<f32>>(value).map_err(|e| e.to_string()))
+    {
+        Ok(embedding) => embedding,
+        Err(err) => {
+            tracing::warn!(%err, "failed to embed prompt for storage");
+            return;
+        }
     };
     let store = store.clone();
     let conversation_id_owned = conversation_id.to_string();
     let prompt_owned = prompt.to_string();
     let result = tauri::async_runtime::spawn_blocking(move || {
-        let embedding = {
-            let mut engine = crate::sync::lock(&engine);
-            engine.embed(&prompt_owned).map_err(|e| e.to_string())?
-        };
         store
             .store_embedding(&conversation_id_owned, &prompt_owned, &embedding)
             .map_err(|e| e.to_string())

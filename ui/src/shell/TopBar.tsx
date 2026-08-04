@@ -18,6 +18,19 @@ import {
 import { useShellStore } from "../store/shellStore";
 import type { ConversationSummary } from "../types";
 import { useTabScroll } from "./useTabScroll";
+import { useContributions } from "../hooks/useContributions";
+
+// Icons for known sidebar-view contribution ids. An extension whose id isn't
+// listed here still renders (falls back to a generic icon) — this map only
+// controls which icon shows, not whether the entry appears at all.
+const SIDEBAR_VIEW_ICONS: Record<string, typeof IconTopologyStar3> = {
+  "flow-editor": IconTopologyStar3,
+};
+
+// Handlers for known sidebar-view contribution ids, supplied by the caller
+// via props below. An extension without a matching handler still renders,
+// it just does nothing on click yet — matches how a real future extension
+// with no host-side action bound to it would behave.
 
 const isTauri = typeof window !== "undefined" && "__TAURI_INTERNALS__" in window;
 const appWindow = isTauri ? getCurrentWindow() : null;
@@ -57,6 +70,11 @@ function TopBar({ conversations, onNewChat, onOpenFlowEditor }: TopBarProps) {
   const menuRef = useRef<HTMLDivElement>(null);
   const addMenuRef = useRef<HTMLDivElement>(null);
   const { scrollRef, showLeft, showRight, scrollByStep } = useTabScroll(openTabs.length);
+  const contributions = useContributions();
+  const sidebarViewContributions = contributions.filter((c) => c.kind === "sidebarView");
+  const sidebarViewHandlers: Record<string, () => void> = {
+    "flow-editor": onOpenFlowEditor,
+  };
 
   useEffect(() => {
     function onDocClick(e: MouseEvent) {
@@ -128,9 +146,20 @@ function TopBar({ conversations, onNewChat, onOpenFlowEditor }: TopBarProps) {
         </div>
       </div>
 
-      <div className="topbar-btn" onClick={onOpenFlowEditor} title="Open flow editor">
-        <IconTopologyStar3 size={15} aria-hidden />
-      </div>
+      {sidebarViewContributions.map((contribution) => {
+        const Icon = SIDEBAR_VIEW_ICONS[contribution.id] ?? IconTopologyStar3;
+        const handler = sidebarViewHandlers[contribution.id];
+        return (
+          <div
+            key={contribution.id}
+            className="topbar-btn"
+            onClick={handler}
+            title={`Open ${contribution.title.toLowerCase()}`}
+          >
+            <Icon size={15} aria-hidden />
+          </div>
+        );
+      })}
 
       <div className="tab-scroll">
         {showLeft && (

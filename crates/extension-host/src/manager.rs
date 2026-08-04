@@ -35,13 +35,31 @@ fn discover_in(dir: &Path) -> Vec<ExtensionManifest> {
         .collect()
 }
 
-/// Finds one installed extension by id, resolving its `manifest.backend`
-/// paths (relative to its own directory) to absolute paths so the caller
-/// can spawn it regardless of the current working directory.
+/// Finds one installed extension by id.
 pub fn find_extension(id: &str) -> Option<ExtensionManifest> {
     discover_installed_extensions()
         .into_iter()
         .find(|m| m.id == id)
+}
+
+/// Builds a per-load manifest from an installed extension's declared
+/// backend command, replacing its args with `args` — used when a manifest's
+/// static `backend.args` doesn't include per-load specifics (e.g. which
+/// `.gguf` file to load), chosen by the user rather than fixed at install
+/// time. Errors if the extension has no backend at all (a UI-only
+/// extension) since there's nothing to spawn.
+pub fn with_backend_args(
+    mut manifest: ExtensionManifest,
+    args: Vec<String>,
+) -> Result<ExtensionManifest, String> {
+    let command = manifest
+        .backend
+        .as_ref()
+        .ok_or_else(|| format!("extension {:?} has no backend to spawn", manifest.id))?
+        .command
+        .clone();
+    manifest.backend = Some(crate::manifest::ExtensionBackend { command, args });
+    Ok(manifest)
 }
 
 #[cfg(test)]
@@ -65,10 +83,10 @@ mod tests {
             id: id.to_string(),
             version: "1.0.0".to_string(),
             display_name: id.to_string(),
-            backend: ExtensionBackend {
+            backend: Some(ExtensionBackend {
                 command: "echo".to_string(),
                 args: vec![],
-            },
+            }),
             provides: vec!["inference.chat/v1".to_string()],
             requires: vec![],
             contributes: None,

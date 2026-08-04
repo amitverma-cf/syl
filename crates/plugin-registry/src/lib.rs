@@ -5,9 +5,9 @@ mod signing;
 
 pub use apply::{apply_remote_registry, RegistrySignatures};
 pub use fetch::{
-    download_and_extract_zip, download_to_cache, download_to_dir, fetch_remote_registry,
-    fetch_remote_registry_conditional, is_cached, read_etag, write_etag, ConditionalFetch,
-    RegistryPollResult,
+    download_and_extract_zip, download_to_cache, download_to_dir, fetch_registry_signatures,
+    fetch_remote_registry, fetch_remote_registry_conditional, is_cached, read_etag, write_etag,
+    ConditionalFetch, RegistryPollResult,
 };
 pub use resolve::{
     resolve_engine_library_path, resolve_model_entry_files, resolve_model_for_kind, ResolvedModel,

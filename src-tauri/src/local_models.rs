@@ -5,7 +5,7 @@ use std::sync::{Arc, Mutex};
 use core_types::app_config::app_config;
 use core_types::workspace_paths;
 use daemon::events::{DaemonEvent, EventBus};
-use extension_host::{ExtensionBackend, ExtensionManifest, ExtensionProcess};
+use extension_host::{ExtensionManifest, ExtensionProcess};
 use plugin_registry::{resolve_local_path, ModelEntry, ModelKind};
 
 #[derive(Default)]
@@ -88,17 +88,17 @@ fn prune_dead(loaded: &mut HashMap<String, Arc<ExtensionProcess>>) -> Vec<String
     dead
 }
 
-/// Resolves the `engine-worker` binary's path next to the running app's own
-/// executable — works in dev (`cargo build` puts both binaries in the same
-/// `target/debug`/`target/release` directory) and, once packaged, for a
+/// Resolves an extension worker binary's path next to the running app's own
+/// executable — works in dev (`cargo build` puts every worker binary in the
+/// same `target/debug`/`target/release` directory) and, once packaged, for a
 /// Tauri sidecar (`bundle.externalBin`), which is likewise placed alongside
 /// the main executable. See the extension-ecosystem plan's packaging note.
-pub(crate) fn resolve_engine_worker_binary_path() -> Result<PathBuf, String> {
+pub(crate) fn resolve_worker_binary_path(binary_name: &str) -> Result<PathBuf, String> {
     let current_exe = std::env::current_exe().map_err(|e| e.to_string())?;
     let dir = current_exe
         .parent()
         .ok_or_else(|| "current executable has no parent directory".to_string())?;
-    Ok(dir.join(format!("engine-worker{}", std::env::consts::EXE_SUFFIX)))
+    Ok(dir.join(format!("{binary_name}{}", std::env::consts::EXE_SUFFIX)))
 }
 
 /// The `llama-cpp-chat` extension's own manifest declares `provides`/
@@ -112,12 +112,12 @@ pub(crate) fn build_chat_extension_manifest(
     engine_library_path: &Path,
     n_ctx: u32,
 ) -> Result<ExtensionManifest, String> {
-    let mut manifest = extension_host::find_extension("llama-cpp-chat").ok_or_else(|| {
+    let manifest = extension_host::find_extension("llama-cpp-chat").ok_or_else(|| {
         "the llama-cpp-chat extension is not installed under .syl/extensions/".to_string()
     })?;
-    manifest.backend = ExtensionBackend {
-        command: manifest.backend.command,
-        args: vec![
+    extension_host::with_backend_args(
+        manifest,
+        vec![
             "--library".to_string(),
             engine_library_path.display().to_string(),
             "--model".to_string(),
@@ -125,8 +125,7 @@ pub(crate) fn build_chat_extension_manifest(
             "--n-ctx".to_string(),
             n_ctx.to_string(),
         ],
-    };
-    Ok(manifest)
+    )
 }
 
 #[derive(Clone, serde::Serialize)]
@@ -664,7 +663,7 @@ mod tests {
             id: "llama-cpp-chat".to_string(),
             version: "1.0.0".to_string(),
             display_name: "llama.cpp Chat Engine".to_string(),
-            backend: extension_host::ExtensionBackend {
+            backend: Some(extension_host::ExtensionBackend {
                 command: engine_worker_path.display().to_string(),
                 args: vec![
                     "--library".to_string(),
@@ -674,7 +673,7 @@ mod tests {
                     "--n-ctx".to_string(),
                     "2048".to_string(),
                 ],
-            },
+            }),
             provides: vec!["inference.chat/v1".to_string()],
             requires: Vec::new(),
             contributes: None,
