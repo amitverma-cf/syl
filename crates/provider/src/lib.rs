@@ -6,7 +6,8 @@ mod keys;
 pub use catalog::{list_cloud_models, CloudModel};
 pub use cloud::{build_client, chat_with_tools, stream_chat, CloudChatError};
 pub use custom::{
-    add_custom_provider, list_custom_providers, CustomProviderConfig, CustomProviderError,
+    add_custom_provider, list_custom_providers, remove_custom_provider, update_custom_provider,
+    CustomProviderConfig, CustomProviderError,
 };
 pub use keys::{delete_api_key, list_providers, load_env_file, set_api_key, ProviderInfo};
 

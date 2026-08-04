@@ -175,6 +175,8 @@ pub fn run() {
             providers::list_cloud_models,
             providers::list_custom_providers,
             providers::add_custom_provider,
+            providers::update_custom_provider,
+            providers::remove_custom_provider,
             mcp::list_mcp_servers,
             mcp::add_mcp_server,
             mcp::remove_mcp_server,
