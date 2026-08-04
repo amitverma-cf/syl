@@ -42,6 +42,15 @@
       "nsis": {
         "installMode": "currentUser"
       }
+    },
+    "createUpdaterArtifacts": true
+  },
+  "plugins": {
+    "updater": {
+      "endpoints": [
+        "https://github.com/amitverma-cf/syl/releases/latest/download/latest.json"
+      ],
+      "pubkey": "dW50cnVzdGVkIGNvbW1lbnQ6IG1pbmlzaWduIHB1YmxpYyBrZXk6IDcxMkVGREMzMjBCQTM5RUQKUldUdE9ib2d3LzB1Y1UreUUyaUloRXVUSFdZbUhJUDdOazIzcXFXTU5IUStRZ21tYWVmRGo3MnEK"
     }
   }
 }

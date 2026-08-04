@@ -1,4 +1,6 @@
 import { Command } from "cmdk";
+import { invoke } from "@tauri-apps/api/core";
+import { toast } from "sonner";
 import {
   IconMessageCircle,
   IconBox,
@@ -8,10 +10,43 @@ import {
   IconTopologyStar3,
   IconFileText,
   IconLayoutSidebar,
+  IconRefresh,
 } from "@tabler/icons-react";
 import { useShellStore } from "../store/shellStore";
 import { Overlay } from "../components/ui";
 import type { ConversationSummary, LocalModelInfo } from "../types";
+
+interface UpdateInfo {
+  version: string;
+  currentVersion: string;
+  body: string | null;
+}
+
+async function checkForAppUpdate() {
+  const toastId = toast.loading("Checking for updates…");
+  try {
+    const update = await invoke<UpdateInfo | null>("check_for_update");
+    if (!update) {
+      toast.success("You're on the latest version", { id: toastId });
+      return;
+    }
+    toast.success(`Update available: ${update.currentVersion} → ${update.version}`, {
+      id: toastId,
+      description: update.body ?? undefined,
+      action: {
+        label: "Install & restart",
+        onClick: () => {
+          const installId = toast.loading(`Downloading ${update.version}…`);
+          invoke("install_update")
+            .then(() => toast.success("Update installed — restarting…", { id: installId }))
+            .catch((err) => toast.error(String(err), { id: installId }));
+        },
+      },
+    });
+  } catch (err) {
+    toast.error(String(err), { id: toastId });
+  }
+}
 
 interface CommandPaletteProps {
   conversations: ConversationSummary[];
@@ -92,6 +127,10 @@ function CommandPalette({ conversations, localModels, onSelectConversation, onNe
               <Command.Item onSelect={() => run(() => useShellStore.getState().setOnboardingOpen(true))}>
                 <IconBolt aria-hidden />
                 Show welcome guide
+              </Command.Item>
+              <Command.Item onSelect={() => run(checkForAppUpdate)}>
+                <IconRefresh aria-hidden />
+                Check for updates
               </Command.Item>
             </Command.Group>
           </Command.List>

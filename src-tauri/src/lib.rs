@@ -15,6 +15,7 @@ mod providers;
 mod scheduled_jobs;
 mod speech;
 mod sync;
+mod updater;
 
 use std::sync::Arc;
 
@@ -54,6 +55,7 @@ pub fn run() {
         .plugin(tauri_plugin_opener::init())
         .plugin(tauri_plugin_fs::init())
         .plugin(tauri_plugin_dialog::init())
+        .plugin(tauri_plugin_updater::Builder::new().build())
         .plugin(tauri_plugin_autostart::init(
             MacosLauncher::LaunchAgent,
             None,
@@ -183,6 +185,8 @@ pub fn run() {
             scheduled_jobs::list_scheduled_jobs,
             scheduled_jobs::add_scheduled_job,
             scheduled_jobs::remove_scheduled_job,
+            updater::check_for_update,
+            updater::install_update,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
