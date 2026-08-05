@@ -1,6 +1,6 @@
 use std::path::Path;
 
-use core_types::workspace_paths;
+use syl_core::workspace_paths;
 
 use crate::manifest::{load_manifest, ExtensionManifest};
 
@@ -8,7 +8,7 @@ use crate::manifest::{load_manifest, ExtensionManifest};
 /// Local sideload only this pass — no download/registry step, matching how
 /// `local.models.json` already layers local overrides on top of the remote
 /// engine/model registry today. A real hosted extensions catalog (with
-/// download/verify, mirroring `plugin_registry::apply_remote_registry`) is
+/// download/verify, mirroring `extension_registry::apply_remote_registry`) is
 /// future work.
 pub fn discover_installed_extensions() -> Vec<ExtensionManifest> {
     discover_in(&workspace_paths::extensions_dir())

@@ -2,11 +2,11 @@ use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex};
 
-use core_types::app_config::app_config;
-use core_types::workspace_paths;
 use daemon::events::{DaemonEvent, EventBus};
 use extension_host::{ExtensionManifest, ExtensionProcess};
-use plugin_registry::{resolve_local_path, ModelEntry, ModelKind};
+use extension_registry::{resolve_local_path, ModelEntry, ModelKind};
+use syl_core::app_config::app_config;
+use syl_core::workspace_paths;
 
 #[derive(Default)]
 pub struct LocalModelState {
@@ -102,7 +102,7 @@ pub(crate) fn resolve_worker_binary_path(binary_name: &str) -> Result<PathBuf, S
 }
 
 /// The `llama-cpp-chat` extension's own manifest declares `provides`/
-/// `requires` and its backend command (the `engine-worker` binary), but not
+/// `requires` and its backend command (the `chat-worker` binary), but not
 /// which `.gguf` model to load — that's chosen per-load by the user, not a
 /// property of the extension itself. This builds a real per-load manifest
 /// from the installed extension's declared backend, appending the concrete
@@ -219,19 +219,19 @@ pub(crate) fn discover_onnx_tts_models() -> Vec<(String, PathBuf, PathBuf, u64)>
 }
 
 fn read_gguf_quantization(path: &Path) -> String {
-    let Ok(library_path) = plugin_registry::resolve_engine_library_path(
+    let Ok(library_path) = extension_registry::resolve_engine_library_path(
         &workspace_paths::registry_dir(),
         &workspace_paths::engines_dir(),
         &app_config().local_engine.id,
     ) else {
         return "unknown".to_string();
     };
-    engine_host::gguf_meta::read_quantization(&library_path, path)
+    native_engines::gguf_meta::read_quantization(&library_path, path)
         .unwrap_or_else(|_| "unknown".to_string())
 }
 
 pub(crate) fn registry_entries() -> Vec<ModelEntry> {
-    plugin_registry::load_model_entries(&workspace_paths::registry_dir()).unwrap_or_default()
+    extension_registry::load_model_entries(&workspace_paths::registry_dir()).unwrap_or_default()
 }
 
 pub(crate) fn kind_for_path(entries: &[ModelEntry], path: &Path) -> Option<ModelKind> {
@@ -380,7 +380,7 @@ pub fn set_local_model_kind(name: String, kind: ModelKind) -> Result<(), String>
     let registry_dir = workspace_paths::registry_dir();
     let local_models_file = registry_dir.join("local.models.json");
     let mut entries =
-        plugin_registry::load_local_model_entries(&registry_dir).map_err(|e| e.to_string())?;
+        extension_registry::load_local_model_entries(&registry_dir).map_err(|e| e.to_string())?;
     entries.retain(|entry| entry.name != name);
     let quantization = if family == ModelFamily::Gguf {
         read_gguf_quantization(&path)
@@ -447,7 +447,7 @@ pub async fn load_local_model(
     }
 
     let local_engine_config = &app_config().local_engine;
-    let engine_library_path = plugin_registry::resolve_engine_library_path(
+    let engine_library_path = extension_registry::resolve_engine_library_path(
         &workspace_paths::registry_dir(),
         &workspace_paths::engines_dir(),
         &local_engine_config.id,
@@ -460,7 +460,7 @@ pub async fn load_local_model(
         local_engine_config.context_size,
     )?;
 
-    // The model now loads in its own isolated `engine-worker` process — if
+    // The model now loads in its own isolated `chat-worker` process — if
     // llama.cpp segfaults or panics across its FFI boundary, only that
     // process dies; the host observes a clean crash error instead of going
     // down with it (see `extension_host::ExtensionProcess`).
@@ -554,7 +554,7 @@ pub fn delete_local_model(
     let registry_dir = workspace_paths::registry_dir();
     let local_models_file = registry_dir.join("local.models.json");
     let entries =
-        plugin_registry::load_local_model_entries(&registry_dir).map_err(|e| e.to_string())?;
+        extension_registry::load_local_model_entries(&registry_dir).map_err(|e| e.to_string())?;
     let remaining: Vec<_> = entries
         .into_iter()
         .filter(|entry| entry.name != name)
@@ -632,11 +632,11 @@ mod tests {
     }
 
     /// A real, non-mocked proof of the A1 fix: a genuinely spawned
-    /// `engine-worker` process that's then killed must not linger in
+    /// `chat-worker` process that's then killed must not linger in
     /// `LocalModelState` as if it were still usable. Needs a real local
     /// `.syl` workspace with a chat model (same requirement as
-    /// `engine-worker`'s own `real_engine_worker.rs` tests) and the
-    /// `engine-worker` binary already built (`cargo build -p engine-worker`)
+    /// `chat-worker`'s own `real_chat_worker.rs` tests) and the
+    /// `chat-worker` binary already built (`cargo build -p chat-worker`)
     /// — run manually with
     /// `cargo test -p syl --lib -- --ignored a_crashed_local_model`.
     #[tokio::test]
@@ -644,7 +644,7 @@ mod tests {
     async fn a_crashed_local_model_is_pruned_instead_of_reporting_loaded_forever() {
         let registry_dir = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../.syl/registry");
         let cache_dir = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../.syl");
-        let resolved = plugin_registry::resolve_model_for_kind(
+        let resolved = extension_registry::resolve_model_for_kind(
             &registry_dir,
             &cache_dir.join("models"),
             &cache_dir.join("engines"),
@@ -652,11 +652,11 @@ mod tests {
         )
         .expect(".syl workspace has no chat model registered; run the app once to seed it");
 
-        let engine_worker_path =
-            PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../target/debug/engine-worker.exe");
+        let chat_worker_path =
+            PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../target/debug/chat-worker.exe");
         assert!(
-            engine_worker_path.exists(),
-            "run `cargo build -p engine-worker` first"
+            chat_worker_path.exists(),
+            "run `cargo build -p chat-worker` first"
         );
 
         let manifest = extension_host::ExtensionManifest {
@@ -664,7 +664,7 @@ mod tests {
             version: "1.0.0".to_string(),
             display_name: "llama.cpp Chat Engine".to_string(),
             backend: Some(extension_host::ExtensionBackend {
-                command: engine_worker_path.display().to_string(),
+                command: chat_worker_path.display().to_string(),
                 args: vec![
                     "--library".to_string(),
                     resolved.engine_library_path.display().to_string(),

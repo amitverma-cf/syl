@@ -2,10 +2,10 @@ use std::future::Future;
 use std::pin::Pin;
 use std::sync::Arc;
 
-use core_types::app_config::app_config;
-use core_types::workspace_paths;
 use daemon::events::{DaemonEvent, EventBus};
 use daemon::scheduler::CronScheduler;
+use syl_core::app_config::app_config;
+use syl_core::workspace_paths;
 use tauri::{AppHandle, Emitter, Manager};
 
 use crate::scheduled_jobs::{register_persisted_jobs, SchedulerState};
@@ -84,21 +84,21 @@ fn spawn_frontend_bridge(app: AppHandle, event_bus: Arc<EventBus>) {
 async fn poll_registry(event_bus: Arc<EventBus>) {
     let result = tauri::async_runtime::spawn_blocking(|| {
         let registry_dir = workspace_paths::registry_dir();
-        let prev_engines_etag = plugin_registry::read_etag(&registry_dir, "engines");
-        let prev_models_etag = plugin_registry::read_etag(&registry_dir, "models");
+        let prev_engines_etag = extension_registry::read_etag(&registry_dir, "engines");
+        let prev_models_etag = extension_registry::read_etag(&registry_dir, "models");
 
         // Conditional GET (If-None-Match) means the common case — the registry hasn't
         // changed since the last poll — costs a cheap 304 response instead of
         // re-downloading, re-validating, and re-writing the full registry every 6
         // hours for no reason.
-        let poll = plugin_registry::fetch_remote_registry_conditional(
+        let poll = extension_registry::fetch_remote_registry_conditional(
             &app_config().registry_poll_url,
             prev_engines_etag.as_deref(),
             prev_models_etag.as_deref(),
         )?;
 
         if poll.engines.is_none() && poll.models.is_none() {
-            return Ok::<bool, plugin_registry::PluginRegistryError>(false);
+            return Ok::<bool, extension_registry::PluginRegistryError>(false);
         }
 
         // apply_remote_registry validates+writes both files as a pair, so an unchanged
@@ -123,7 +123,7 @@ async fn poll_registry(event_bus: Arc<EventBus>) {
         let signatures = public_key_hex
             .as_deref()
             .map(|public_key_hex| {
-                plugin_registry::fetch_registry_signatures(&app_config().registry_poll_url).map(
+                extension_registry::fetch_registry_signatures(&app_config().registry_poll_url).map(
                     |(engines_sig, models_sig)| {
                         (public_key_hex.to_string(), engines_sig, models_sig)
                     },
@@ -137,7 +137,7 @@ async fn poll_registry(event_bus: Arc<EventBus>) {
         // fails validation, or a network/parse error, leaves the last-known-good
         // registry files exactly as they were, so a compromised or malformed
         // response can never partially or fully overwrite what's already trusted.
-        plugin_registry::apply_remote_registry(
+        extension_registry::apply_remote_registry(
             &registry_dir,
             &engines_json,
             &models_json,
@@ -145,7 +145,7 @@ async fn poll_registry(event_bus: Arc<EventBus>) {
             signatures
                 .as_ref()
                 .map(|(public_key_hex, engines_sig, models_sig)| {
-                    plugin_registry::RegistrySignatures {
+                    extension_registry::RegistrySignatures {
                         public_key_hex,
                         engines_signature_hex: engines_sig,
                         models_signature_hex: models_sig,
@@ -154,10 +154,10 @@ async fn poll_registry(event_bus: Arc<EventBus>) {
         )?;
 
         if let Some(etag) = &poll.engines_etag {
-            let _ = plugin_registry::write_etag(&registry_dir, "engines", etag);
+            let _ = extension_registry::write_etag(&registry_dir, "engines", etag);
         }
         if let Some(etag) = &poll.models_etag {
-            let _ = plugin_registry::write_etag(&registry_dir, "models", etag);
+            let _ = extension_registry::write_etag(&registry_dir, "models", etag);
         }
 
         Ok(true)
@@ -188,9 +188,9 @@ async fn poll_registry(event_bus: Arc<EventBus>) {
 fn read_current(
     registry_dir: &std::path::Path,
     filename: &str,
-) -> Result<String, plugin_registry::PluginRegistryError> {
+) -> Result<String, extension_registry::PluginRegistryError> {
     std::fs::read_to_string(registry_dir.join(filename)).map_err(|source| {
-        plugin_registry::PluginRegistryError::Io {
+        extension_registry::PluginRegistryError::Io {
             path: registry_dir.join(filename),
             source,
         }

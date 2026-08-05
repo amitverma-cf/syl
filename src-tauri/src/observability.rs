@@ -58,7 +58,7 @@ pub fn spawn_sampler(state: Arc<ObservabilityState>) {
                 .and_then(|pid| sys.process(pid))
                 .map(|process| process.memory())
                 .unwrap_or(0);
-            let workspace_disk_bytes = dir_size(&core_types::workspace_paths::workspace_root());
+            let workspace_disk_bytes = dir_size(&syl_core::workspace_paths::workspace_root());
 
             state
                 .cpu_usage_percent_x1000

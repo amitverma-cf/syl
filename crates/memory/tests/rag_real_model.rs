@@ -1,8 +1,8 @@
 use std::path::Path;
 
-use engine_host::llama::LlamaEngine;
+use extension_registry::ModelKind;
 use memory::{EmbeddingStore, SqliteConversationStore};
-use plugin_registry::ModelKind;
+use native_engines::llama::LlamaEngine;
 
 #[test]
 #[ignore]
@@ -10,7 +10,7 @@ fn real_embeddings_retrieve_the_semantically_closest_message() {
     let registry_dir = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../.syl/registry");
     let cache_dir = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../.syl");
 
-    let resolved = plugin_registry::resolve_model_for_kind(
+    let resolved = extension_registry::resolve_model_for_kind(
         &registry_dir,
         &cache_dir.join("models"),
         &cache_dir.join("engines"),

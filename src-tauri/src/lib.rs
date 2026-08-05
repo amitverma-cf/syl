@@ -21,16 +21,16 @@ mod updater;
 
 use std::sync::Arc;
 
-use core_types::workspace_paths;
 use daemon::DaemonState;
 use memory::SqliteConversationStore;
 use observability::ObservabilityState;
 use permission::TauriPermissionPrompter;
+use syl_core::workspace_paths;
 use tauri::menu::{Menu, MenuItem};
 use tauri::tray::TrayIconBuilder;
 use tauri::{Manager, WindowEvent};
 use tauri_plugin_autostart::MacosLauncher;
-use tool::{ReadFileTool, RunCommandTool, ToolExecutor, WriteFileTool};
+use tools::{ReadFileTool, RunCommandTool, ToolExecutor, WriteFileTool};
 
 pub struct AppState {
     pub conversation_store: Arc<SqliteConversationStore>,

@@ -1,7 +1,7 @@
 use std::path::{Path, PathBuf};
 
-use core_types::workspace_paths;
-use plugin_registry::{DownloadSource, EngineEntry, ModelEntry};
+use extension_registry::{DownloadSource, EngineEntry, ModelEntry};
+use syl_core::workspace_paths;
 
 pub fn ensure_workspace_seeded() {
     migrate_legacy_workspace();
@@ -18,12 +18,14 @@ pub fn ensure_workspace_seeded() {
     tracing::info!(dir = %workspace_paths::workspace_root().display(), "seeding local .syl workspace");
 
     let repo_registry_dir = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../registry");
-    let base_engines = plugin_registry::load_engine_entries(&repo_registry_dir).unwrap_or_default();
-    let base_models = plugin_registry::load_model_entries(&repo_registry_dir).unwrap_or_default();
+    let base_engines =
+        extension_registry::load_engine_entries(&repo_registry_dir).unwrap_or_default();
+    let base_models =
+        extension_registry::load_model_entries(&repo_registry_dir).unwrap_or_default();
     let local_engines =
-        plugin_registry::load_local_engine_entries(&syl_registry_dir).unwrap_or_default();
+        extension_registry::load_local_engine_entries(&syl_registry_dir).unwrap_or_default();
     let local_models =
-        plugin_registry::load_local_model_entries(&syl_registry_dir).unwrap_or_default();
+        extension_registry::load_local_model_entries(&syl_registry_dir).unwrap_or_default();
 
     let seeded_engines: Vec<EngineEntry> = base_engines
         .into_iter()
@@ -120,13 +122,13 @@ fn seed_extensions() {
     seed_worker_extension(
         "llama-cpp-chat",
         "llama.cpp Chat Engine",
-        "engine-worker",
+        "chat-worker",
         vec!["inference.chat/v1".to_string()],
     );
     seed_worker_extension(
         "stable-diffusion-image",
         "Stable Diffusion Image Generator",
-        "sd-worker",
+        "image-worker",
         vec!["image.generate/v1".to_string()],
     );
     seed_worker_extension(
@@ -244,14 +246,14 @@ fn seed_into(
     dest_dir: &Path,
     expected_sha256: Option<&str>,
 ) -> Option<PathBuf> {
-    match plugin_registry::resolve_download_url(download_url) {
+    match extension_registry::resolve_download_url(download_url) {
         Ok(DownloadSource::Local(source_path)) => {
             let source_dir = source_path.parent()?;
             copy_dir_files(source_dir, dest_dir).ok()?;
             Some(dest_dir.join(source_path.file_name()?))
         }
         Ok(DownloadSource::Remote(url)) => {
-            plugin_registry::download_to_cache(&url, dest_dir, expected_sha256).ok()
+            extension_registry::download_to_cache(&url, dest_dir, expected_sha256).ok()
         }
         Err(err) => {
             tracing::warn!(?err, url = %download_url, "skipping seed, source not resolvable");

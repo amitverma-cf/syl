@@ -277,7 +277,7 @@ impl ExtensionProcess {
     /// method, streaming `inference/piece` notifications to `on_piece` as
     /// they arrive — same `impl FnMut(&str)` shape the pre-extension
     /// in-process `LlamaEngine::generate` callback used, so callers
-    /// (`engine_host::tool_loop::generate_with_tools`, `commands.rs`) don't
+    /// (`native_engines::tool_loop::generate_with_tools`, `commands.rs`) don't
     /// need to change shape, only which concrete type they call into.
     pub async fn generate(
         &self,

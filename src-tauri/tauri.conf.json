@@ -45,8 +45,8 @@
     },
     "createUpdaterArtifacts": true,
     "externalBin": [
-      "binaries/engine-worker",
-      "binaries/sd-worker",
+      "binaries/chat-worker",
+      "binaries/image-worker",
       "binaries/embedding-worker",
       "binaries/asr-worker",
       "binaries/tts-worker"

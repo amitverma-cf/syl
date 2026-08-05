@@ -1,4 +1,4 @@
-use core_types::workspace_paths;
+use syl_core::workspace_paths;
 use tauri_plugin_autostart::ManagerExt;
 
 /// Genuinely user-adjustable app settings, persisted to `.syl/settings.json`

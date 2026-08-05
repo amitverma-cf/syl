@@ -1,16 +1,16 @@
 use std::sync::Arc;
 
-use core_types::app_config::app_config;
-use core_types::workspace_paths;
 use daemon::events::DaemonEvent;
 use extension_host::ExtensionProcess;
+use extension_registry::ModelKind;
 use memory::{
     ConversationStore, ConversationSummary, EmbeddingStore, Message, SqliteConversationStore,
     ToolPermissionDecision, ToolPermissionStore,
 };
-use plugin_registry::ModelKind;
+use syl_core::app_config::app_config;
+use syl_core::workspace_paths;
 use tauri::ipc::{Channel, Response};
-use tool::ToolExecutor;
+use tools::ToolExecutor;
 
 use crate::daemon::DaemonState;
 use crate::embeddings::OnnxModelState;
@@ -241,11 +241,11 @@ pub async fn generate_flow_draft(
 
     match cloud_model {
         Some(model_id) => {
-            let client = provider::build_client(
+            let client = cloud_providers::build_client(
                 &workspace_paths::env_file(),
                 &workspace_paths::custom_providers_file(),
             );
-            provider::stream_chat(
+            cloud_providers::stream_chat(
                 &client,
                 &model_id,
                 Some(FLOW_GEN_SYSTEM_PROMPT),
@@ -342,14 +342,14 @@ pub async fn call_tool(
 }
 
 #[tauri::command]
-pub fn list_tools(state: tauri::State<'_, ToolState>) -> Vec<tool::ToolSpec> {
+pub fn list_tools(state: tauri::State<'_, ToolState>) -> Vec<tools::ToolSpec> {
     state.executor.tool_specs()
 }
 
 #[tauri::command]
 pub fn respond_permission(
     request_id: u64,
-    response: tool::PromptResponse,
+    response: tools::PromptResponse,
     state: tauri::State<'_, ToolState>,
 ) {
     state.prompter.resolve(request_id, response);
@@ -401,12 +401,12 @@ pub fn clear_tool_permission(
 
 /// Folds recent conversation history into the prompt, keeping the most recent
 /// messages within `contextBudgetChars` (older messages are dropped first, per
-/// `tool::compress_context`) — a real character budget instead of sending the
+/// `tools::compress_context`) — a real character budget instead of sending the
 /// whole conversation unbounded on every turn.
 fn compressed_history_block(store: &Arc<SqliteConversationStore>, conversation_id: &str) -> String {
     let messages = store.list_messages(conversation_id).unwrap_or_default();
     let budget = app_config().context_budget_chars;
-    let compressed = tool::compress_context(&messages, budget);
+    let compressed = tools::compress_context(&messages, budget);
     if compressed.is_empty() {
         return String::new();
     }
@@ -533,7 +533,7 @@ pub(crate) async fn run_generate_cloud(
     prompt: &str,
     system_prompt: &str,
     model_id: &str,
-    tools: &[tool::ToolSpec],
+    tools: &[tools::ToolSpec],
     executor: &ToolExecutor,
     mut on_piece: impl FnMut(&str) + Send,
 ) -> Result<(), String> {
@@ -547,11 +547,11 @@ pub(crate) async fn run_generate_cloud(
     .map_err(|e| e.to_string())?
     .map_err(|e| e.to_string())?;
 
-    let client = provider::build_client(
+    let client = cloud_providers::build_client(
         &workspace_paths::env_file(),
         &workspace_paths::custom_providers_file(),
     );
-    let response = provider::chat_with_tools(
+    let response = cloud_providers::chat_with_tools(
         &client,
         model_id,
         Some(system_prompt),
@@ -586,11 +586,11 @@ pub(crate) async fn run_generate(
     conversation_id: &str,
     prompt: &str,
     system_prompt: &str,
-    tools: &[tool::ToolSpec],
+    tools: &[tools::ToolSpec],
     executor: &ToolExecutor,
     on_piece: impl FnMut(&str),
 ) -> Result<(), String> {
-    let resolved = plugin_registry::resolve_model_for_kind(
+    let resolved = extension_registry::resolve_model_for_kind(
         &workspace_paths::registry_dir(),
         &workspace_paths::models_dir(),
         &workspace_paths::engines_dir(),
@@ -630,7 +630,7 @@ pub(crate) async fn run_generate_with_process(
     conversation_id: &str,
     prompt: &str,
     system_prompt: &str,
-    tools: &[tool::ToolSpec],
+    tools: &[tools::ToolSpec],
     executor: &ToolExecutor,
     mut on_piece: impl FnMut(&str),
 ) -> Result<(), String> {
@@ -657,12 +657,12 @@ pub(crate) async fn run_generate_with_process(
 }
 
 /// The tool-calling loop, now genuinely `async` end to end: talking to the
-/// isolated `engine-worker` process over its stdio pipes doesn't block a
+/// isolated `chat-worker` process over its stdio pipes doesn't block a
 /// thread the way the old direct FFI call did, so this calls
 /// `executor.call(...).await` directly instead of the previous
 /// `Handle::current().block_on(...)` hack that only existed because
 /// generation used to run inside a `spawn_blocking` closure. Reuses
-/// `engine_host::tool_loop`'s backend-agnostic prompt/parsing helpers —
+/// `native_engines::tool_loop`'s backend-agnostic prompt/parsing helpers —
 /// building the tool-catalog preamble and extracting a tool call from
 /// generated text doesn't care whether the text came from an in-process
 /// engine or an isolated extension process.
@@ -671,7 +671,7 @@ async fn generate_with_tools_via_process(
     process: &ExtensionProcess,
     system_prompt: &str,
     user_prompt: &str,
-    tools: &[tool::ToolSpec],
+    tools: &[tools::ToolSpec],
     executor: &ToolExecutor,
     conversation_id: &str,
     max_tokens: i32,
@@ -679,7 +679,7 @@ async fn generate_with_tools_via_process(
 ) -> Result<String, String> {
     let mut running_prompt = format!(
         "{system_prompt}{}\n\nUser: {user_prompt}\nAssistant:",
-        engine_host::tool_loop::tool_catalog_prompt(tools)
+        native_engines::tool_loop::tool_catalog_prompt(tools)
     );
 
     let max_tool_iterations = app_config().max_tool_iterations;
@@ -689,7 +689,7 @@ async fn generate_with_tools_via_process(
             .await
             .map_err(|e| e.to_string())?;
 
-        let Some((name, args)) = engine_host::tool_loop::extract_tool_call(&output) else {
+        let Some((name, args)) = native_engines::tool_loop::extract_tool_call(&output) else {
             return Ok(output);
         };
 

@@ -6,7 +6,7 @@ use std::time::Duration;
 use async_trait::async_trait;
 use tauri::Emitter;
 use tokio::sync::oneshot;
-use tool::{PermissionPrompter, PromptResponse};
+use tools::{PermissionPrompter, PromptResponse};
 
 /// How long a permission prompt waits for the user before auto-denying. Without this, a
 /// request the user never sees (app minimized, notification missed, window closed

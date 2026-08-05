@@ -1,20 +1,20 @@
 [workspace]
 resolver = "2"
 members = [
-    "crates/core-types",
-    "crates/provider",
-    "crates/engine-host",
+    "crates/core",
+    "crates/cloud-providers",
+    "crates/native-engines",
     "crates/memory",
-    "crates/tool",
-    "crates/executor",
+    "crates/tools",
+    "crates/flow-engine",
     "crates/daemon",
-    "crates/plugin-registry",
+    "crates/extension-registry",
     "crates/extension-host",
-    "crates/engine-worker",
-    "crates/sd-worker",
-    "crates/embedding-worker",
-    "crates/asr-worker",
-    "crates/tts-worker",
+    "crates/extensions/chat-worker",
+    "crates/extensions/image-worker",
+    "crates/extensions/embedding-worker",
+    "crates/extensions/asr-worker",
+    "crates/extensions/tts-worker",
     "src-tauri",
 ]
 
@@ -25,14 +25,14 @@ license = "MIT"
 repository = "https://github.com/amve/syl"
 
 [workspace.dependencies]
-core-types = { path = "crates/core-types" }
-provider = { path = "crates/provider" }
-engine-host = { path = "crates/engine-host" }
+syl-core = { path = "crates/core" }
+cloud-providers = { path = "crates/cloud-providers" }
+native-engines = { path = "crates/native-engines" }
 memory = { path = "crates/memory" }
-tool = { path = "crates/tool" }
-executor = { path = "crates/executor" }
+tools = { path = "crates/tools" }
+flow-engine = { path = "crates/flow-engine" }
 daemon = { path = "crates/daemon" }
-plugin-registry = { path = "crates/plugin-registry" }
+extension-registry = { path = "crates/extension-registry" }
 extension-host = { path = "crates/extension-host" }
 
 serde = { version = "1", features = ["derive"] }

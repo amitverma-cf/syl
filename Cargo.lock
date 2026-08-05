@@ -103,9 +103,9 @@ name = "asr-worker"
 version = "0.1.0"
 dependencies = [
  "base64 0.22.1",
- "engine-host",
  "extension-host",
- "plugin-registry",
+ "extension-registry",
+ "native-engines",
  "serde_json",
  "tokio",
  "tracing",
@@ -664,6 +664,19 @@ dependencies = [
 ]
 
 [[package]]
+name = "chat-worker"
+version = "0.1.0"
+dependencies = [
+ "extension-host",
+ "extension-registry",
+ "native-engines",
+ "serde_json",
+ "tokio",
+ "tracing",
+ "tracing-subscriber",
+]
+
+[[package]]
 name = "chrono"
 version = "0.4.45"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -696,6 +709,23 @@ dependencies = [
  "glob",
  "libc",
  "libloading 0.8.9",
+]
+
+[[package]]
+name = "cloud-providers"
+version = "0.1.0"
+dependencies = [
+ "futures-util",
+ "genai",
+ "memory",
+ "serde",
+ "serde_json",
+ "syl-core",
+ "thiserror 1.0.69",
+ "tokio",
+ "tools",
+ "tracing",
+ "ureq",
 ]
 
 [[package]]
@@ -831,16 +861,6 @@ dependencies = [
  "bitflags 2.13.1",
  "core-foundation 0.10.1",
  "libc",
-]
-
-[[package]]
-name = "core-types"
-version = "0.1.0"
-dependencies = [
- "dirs 6.0.0",
- "serde",
- "serde_json",
- "thiserror 1.0.69",
 ]
 
 [[package]]
@@ -1038,9 +1058,9 @@ dependencies = [
 name = "daemon"
 version = "0.1.0"
 dependencies = [
- "core-types",
  "serde",
  "serde_json",
+ "syl-core",
  "thiserror 1.0.69",
  "tokio",
  "tokio-cron-scheduler",
@@ -1459,9 +1479,9 @@ checksum = "4ef6b89e5b37196644d8796de5268852ff179b44e96276cf4290264843743bb7"
 name = "embedding-worker"
 version = "0.1.0"
 dependencies = [
- "engine-host",
  "extension-host",
- "plugin-registry",
+ "extension-registry",
+ "native-engines",
  "serde_json",
  "tokio",
  "tracing",
@@ -1482,40 +1502,6 @@ name = "endi"
 version = "1.1.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "66b7e2430c6dff6a955451e2cfc438f09cea1965a9d6f87f7e3b90decc014099"
-
-[[package]]
-name = "engine-host"
-version = "0.1.0"
-dependencies = [
- "bindgen 0.70.1",
- "core-types",
- "hound",
- "libloading 0.8.9",
- "memory",
- "ort",
- "plugin-registry",
- "png 0.17.16",
- "rustfft",
- "serde_json",
- "thiserror 1.0.69",
- "tokenizers",
- "tokio",
- "tool",
- "tracing",
-]
-
-[[package]]
-name = "engine-worker"
-version = "0.1.0"
-dependencies = [
- "engine-host",
- "extension-host",
- "plugin-registry",
- "serde_json",
- "tokio",
- "tracing",
- "tracing-subscriber",
-]
 
 [[package]]
 name = "enumflags2"
@@ -1603,31 +1589,32 @@ dependencies = [
 ]
 
 [[package]]
-name = "executor"
-version = "0.1.0"
-dependencies = [
- "core-types",
- "engine-host",
- "jsonschema",
- "plugin-registry",
- "serde",
- "serde_json",
- "thiserror 1.0.69",
- "tokio",
- "tool",
-]
-
-[[package]]
 name = "extension-host"
 version = "0.1.0"
 dependencies = [
- "core-types",
  "serde",
  "serde_json",
+ "syl-core",
  "thiserror 1.0.69",
  "tokio",
  "tracing",
  "win32job",
+]
+
+[[package]]
+name = "extension-registry"
+version = "0.1.0"
+dependencies = [
+ "ed25519-dalek",
+ "getrandom 0.3.4",
+ "hex",
+ "serde",
+ "serde_json",
+ "sha2",
+ "thiserror 1.0.69",
+ "ureq",
+ "url",
+ "zip 2.4.2",
 ]
 
 [[package]]
@@ -1708,6 +1695,21 @@ checksum = "843fba2746e448b37e26a819579957415c8cef339bf08564fe8b7ddbd959573c"
 dependencies = [
  "crc32fast",
  "miniz_oxide",
+]
+
+[[package]]
+name = "flow-engine"
+version = "0.1.0"
+dependencies = [
+ "extension-registry",
+ "jsonschema",
+ "native-engines",
+ "serde",
+ "serde_json",
+ "syl-core",
+ "thiserror 1.0.69",
+ "tokio",
+ "tools",
 ]
 
 [[package]]
@@ -2555,6 +2557,20 @@ dependencies = [
 ]
 
 [[package]]
+name = "image-worker"
+version = "0.1.0"
+dependencies = [
+ "base64 0.22.1",
+ "extension-host",
+ "extension-registry",
+ "native-engines",
+ "serde_json",
+ "tokio",
+ "tracing",
+ "tracing-subscriber",
+]
+
+[[package]]
 name = "indexmap"
 version = "1.9.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -3031,12 +3047,12 @@ dependencies = [
 name = "memory"
 version = "0.1.0"
 dependencies = [
- "core-types",
- "engine-host",
- "plugin-registry",
+ "extension-registry",
+ "native-engines",
  "rusqlite",
  "serde",
  "sqlite-vec",
+ "syl-core",
  "thiserror 1.0.69",
 ]
 
@@ -3136,6 +3152,27 @@ dependencies = [
  "serde",
  "thiserror 2.0.19",
  "windows-sys 0.61.2",
+]
+
+[[package]]
+name = "native-engines"
+version = "0.1.0"
+dependencies = [
+ "bindgen 0.70.1",
+ "extension-registry",
+ "hound",
+ "libloading 0.8.9",
+ "memory",
+ "ort",
+ "png 0.17.16",
+ "rustfft",
+ "serde_json",
+ "syl-core",
+ "thiserror 1.0.69",
+ "tokenizers",
+ "tokio",
+ "tools",
+ "tracing",
 ]
 
 [[package]]
@@ -3890,22 +3927,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "plugin-registry"
-version = "0.1.0"
-dependencies = [
- "ed25519-dalek",
- "getrandom 0.3.4",
- "hex",
- "serde",
- "serde_json",
- "sha2",
- "thiserror 1.0.69",
- "ureq",
- "url",
- "zip 2.4.2",
-]
-
-[[package]]
 name = "png"
 version = "0.17.16"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -4083,23 +4104,6 @@ dependencies = [
  "tokio",
  "tracing",
  "windows 0.62.2",
-]
-
-[[package]]
-name = "provider"
-version = "0.1.0"
-dependencies = [
- "core-types",
- "futures-util",
- "genai",
- "memory",
- "serde",
- "serde_json",
- "thiserror 1.0.69",
- "tokio",
- "tool",
- "tracing",
- "ureq",
 ]
 
 [[package]]
@@ -4746,20 +4750,6 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "94143f37725109f92c262ed2cf5e59bce7498c01bcc1502d7b9afe439a4e9f49"
 
 [[package]]
-name = "sd-worker"
-version = "0.1.0"
-dependencies = [
- "base64 0.22.1",
- "engine-host",
- "extension-host",
- "plugin-registry",
- "serde_json",
- "tokio",
- "tracing",
- "tracing-subscriber",
-]
-
-[[package]]
 name = "security-framework"
 version = "3.7.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -5286,17 +5276,17 @@ version = "0.1.0"
 dependencies = [
  "async-trait",
  "base64 0.22.1",
- "core-types",
+ "cloud-providers",
  "cpal",
  "daemon",
- "engine-host",
- "executor",
  "extension-host",
+ "extension-registry",
+ "flow-engine",
  "memory",
- "plugin-registry",
- "provider",
+ "native-engines",
  "serde",
  "serde_json",
+ "syl-core",
  "sysinfo",
  "tauri",
  "tauri-build",
@@ -5307,11 +5297,21 @@ dependencies = [
  "tauri-plugin-updater",
  "tokio",
  "tokio-cron-scheduler",
- "tool",
+ "tools",
  "tracing",
  "tracing-appender",
  "tracing-subscriber",
  "uuid",
+]
+
+[[package]]
+name = "syl-core"
+version = "0.1.0"
+dependencies = [
+ "dirs 6.0.0",
+ "serde",
+ "serde_json",
+ "thiserror 1.0.69",
 ]
 
 [[package]]
@@ -6186,7 +6186,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "7d56353a2a665ad0f41a421187180aab746c8c325620617ad883a99a1cbe66d2"
 
 [[package]]
-name = "tool"
+name = "tools"
 version = "0.1.0"
 dependencies = [
  "async-trait",
@@ -6363,9 +6363,9 @@ name = "tts-worker"
 version = "0.1.0"
 dependencies = [
  "base64 0.22.1",
- "engine-host",
  "extension-host",
- "plugin-registry",
+ "extension-registry",
+ "native-engines",
  "serde_json",
  "tokio",
  "tracing",

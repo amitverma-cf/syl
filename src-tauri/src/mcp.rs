@@ -1,9 +1,9 @@
 use std::collections::HashMap;
 use std::sync::Mutex;
 
-use core_types::workspace_paths;
+use syl_core::workspace_paths;
 use tauri::Manager;
-use tool::{
+use tools::{
     McpConnectionHandle, McpServerConfig, McpToolBridge, McpToolDescriptor, McpTransportConfig,
     Tool,
 };
@@ -22,7 +22,7 @@ pub struct McpState {
 
 #[tauri::command]
 pub fn list_mcp_servers() -> Vec<McpServerConfig> {
-    tool::load_mcp_servers(&workspace_paths::mcp_servers_file())
+    tools::load_mcp_servers(&workspace_paths::mcp_servers_file())
 }
 
 #[tauri::command]
@@ -48,10 +48,10 @@ pub async fn add_mcp_server(
         .insert(name.clone(), ConnectedServer { tool_names, handle });
 
     let path = workspace_paths::mcp_servers_file();
-    let mut servers = tool::load_mcp_servers(&path);
+    let mut servers = tools::load_mcp_servers(&path);
     servers.retain(|s| s.name != config.name);
     servers.push(config);
-    tool::save_mcp_servers(&path, &servers).map_err(|e| e.to_string())?;
+    tools::save_mcp_servers(&path, &servers).map_err(|e| e.to_string())?;
 
     Ok(descriptors)
 }
@@ -74,13 +74,13 @@ pub fn remove_mcp_server(
     }
 
     let path = workspace_paths::mcp_servers_file();
-    let mut servers = tool::load_mcp_servers(&path);
+    let mut servers = tools::load_mcp_servers(&path);
     servers.retain(|s| s.name != name);
-    tool::save_mcp_servers(&path, &servers).map_err(|e| e.to_string())
+    tools::save_mcp_servers(&path, &servers).map_err(|e| e.to_string())
 }
 
 pub fn reconnect_saved_servers(app: &tauri::AppHandle) {
-    let servers = tool::load_mcp_servers(&workspace_paths::mcp_servers_file());
+    let servers = tools::load_mcp_servers(&workspace_paths::mcp_servers_file());
     if servers.is_empty() {
         return;
     }

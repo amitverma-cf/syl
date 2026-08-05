@@ -2,12 +2,12 @@ use std::collections::{HashMap, HashSet};
 use std::sync::{Arc, Mutex};
 
 use base64::Engine;
-use core_types::app_config::app_config;
-use core_types::workspace_paths;
 use daemon::events::{DaemonEvent, EventBus};
 use extension_host::{ExtensionManifest, ExtensionProcess};
-use plugin_registry::ModelKind;
+use extension_registry::ModelKind;
 use serde_json::json;
+use syl_core::app_config::app_config;
+use syl_core::workspace_paths;
 
 use crate::local_models::{
     discover_onnx_asr_models, discover_onnx_tts_models, kind_for_path, registry_entries,
@@ -169,7 +169,7 @@ pub async fn load_asr_model(
     }
 
     let onnx_engine_config = &app_config().onnx_engine;
-    let engine_library_path = plugin_registry::resolve_engine_library_path(
+    let engine_library_path = extension_registry::resolve_engine_library_path(
         &workspace_paths::registry_dir(),
         &workspace_paths::engines_dir(),
         &onnx_engine_config.id,
@@ -234,7 +234,7 @@ pub async fn load_tts_model(
     }
 
     let onnx_engine_config = &app_config().onnx_engine;
-    let engine_library_path = plugin_registry::resolve_engine_library_path(
+    let engine_library_path = extension_registry::resolve_engine_library_path(
         &workspace_paths::registry_dir(),
         &workspace_paths::engines_dir(),
         &onnx_engine_config.id,

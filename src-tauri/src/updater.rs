@@ -1,7 +1,7 @@
 use tauri_plugin_updater::UpdaterExt;
 
 /// The app-shell's own update channel — GitHub Releases for this repo's
-/// built installers, entirely independent of the plugin-registry's
+/// built installers, entirely independent of the extension-registry's
 /// engine/model update mechanism (that one updates downloaded models/engine
 /// binaries inside `.syl/`; this one replaces the running app itself).
 #[derive(Clone, serde::Serialize)]

@@ -2,12 +2,12 @@ use std::collections::HashMap;
 use std::sync::{Arc, Mutex};
 
 use base64::Engine;
-use core_types::app_config::app_config;
-use core_types::workspace_paths;
 use daemon::events::{DaemonEvent, EventBus};
 use extension_host::{ExtensionManifest, ExtensionProcess};
-use plugin_registry::ModelKind;
+use extension_registry::ModelKind;
 use serde_json::json;
+use syl_core::app_config::app_config;
+use syl_core::workspace_paths;
 
 use crate::local_models::{discover_gguf_models, kind_for_path, registry_entries};
 
@@ -99,7 +99,7 @@ pub async fn load_image_model(
     }
 
     let sd_engine_config = &app_config().sd_engine;
-    let engine_library_path = plugin_registry::resolve_engine_library_path(
+    let engine_library_path = extension_registry::resolve_engine_library_path(
         &workspace_paths::registry_dir(),
         &workspace_paths::engines_dir(),
         &sd_engine_config.id,
@@ -111,7 +111,7 @@ pub async fn load_image_model(
         .unwrap_or(4);
     let manifest = build_sd_extension_manifest(&model_path, &engine_library_path, n_threads)?;
 
-    // The model now loads in its own isolated `sd-worker` process — a
+    // The model now loads in its own isolated `image-worker` process — a
     // crash inside stable-diffusion.cpp's FFI boundary takes down only that
     // process, not the host (see `extension_host::ExtensionProcess`).
     let process = ExtensionProcess::spawn(manifest)
@@ -171,7 +171,7 @@ pub async fn generate_image(
     let png_base64 = result
         .get("pngBase64")
         .and_then(|v| v.as_str())
-        .ok_or_else(|| "sd-worker response missing pngBase64".to_string())?;
+        .ok_or_else(|| "image-worker response missing pngBase64".to_string())?;
     let png = base64::engine::general_purpose::STANDARD
         .decode(png_base64)
         .map_err(|e| e.to_string())?;
