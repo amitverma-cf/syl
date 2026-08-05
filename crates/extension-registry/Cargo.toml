@@ -1,0 +1,19 @@
+[package]
+name = "extension-registry"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[dependencies]
+sha2.workspace = true
+zip.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+thiserror.workspace = true
+ureq.workspace = true
+url = "2"
+ed25519-dalek = "2"
+hex = "0.4"
+
+[dev-dependencies]
+getrandom = "0.3"

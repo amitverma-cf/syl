@@ -5,7 +5,7 @@ edition.workspace = true
 license.workspace = true
 
 [dependencies]
-core-types.workspace = true
+syl-core.workspace = true
 serde.workspace = true
 serde_json.workspace = true
 thiserror.workspace = true
@@ -19,3 +19,6 @@ tokio = { workspace = true, features = ["io-util", "io-std", "rt-multi-thread", 
 [[bin]]
 name = "fixture_extension"
 path = "tests/fixtures/fixture_extension.rs"
+
+[target."cfg(windows)".dependencies]
+win32job = "2.0.3"

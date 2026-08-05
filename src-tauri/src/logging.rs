@@ -6,7 +6,7 @@ use tracing_subscriber::fmt::writer::MakeWriterExt;
 const LOG_RETENTION: Duration = Duration::from_secs(14 * 24 * 60 * 60);
 
 pub fn init() -> WorkerGuard {
-    let log_dir = core_types::workspace_paths::logs_dir();
+    let log_dir = syl_core::workspace_paths::logs_dir();
     prune_old_logs(&log_dir);
 
     let file_appender = tracing_appender::rolling::daily(&log_dir, "syl.log");

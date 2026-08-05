@@ -2,9 +2,9 @@ use std::collections::HashMap;
 use std::path::PathBuf;
 use std::sync::Mutex;
 
-use core_types::app_config::app_config;
-use core_types::workspace_paths;
-use executor::{parse_flow, Flow, FlowRunner};
+use flow_engine::{parse_flow, Flow, FlowRunner};
+use syl_core::app_config::app_config;
+use syl_core::workspace_paths;
 
 pub fn default_flow_name() -> &'static str {
     &app_config().default_flow_name
@@ -105,7 +105,7 @@ fn load_flow_runner(
 ) -> Result<FlowRunner, String> {
     let path = resolve_flow_path(name, workspace_folder);
     let bytes = std::fs::read(&path).map_err(|e| e.to_string())?;
-    let flow = executor::parse_flow(&bytes).map_err(|e| e.to_string())?;
+    let flow = flow_engine::parse_flow(&bytes).map_err(|e| e.to_string())?;
     FlowRunner::new(flow).map_err(|e| e.to_string())
 }
 

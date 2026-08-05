@@ -11,6 +11,7 @@
     "defaultFlowName": "default",
     "registryPollUrl": "https://raw.githubusercontent.com/amitverma-cf/syl/main/registry",
     "registryAllowedHosts": ["github.com", "huggingface.co"],
+    "registryManifestPublicKey": "f40923f9cf96a9a2316a10e0d743684986543ddbf4bee5c02c2256ac71f7e82a",
     "maxToolIterations": 8,
     "contextBudgetChars": 12000,
     "localEngine": {

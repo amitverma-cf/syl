@@ -1,57 +1,149 @@
 use std::collections::{HashMap, HashSet};
 use std::sync::{Arc, Mutex};
 
-use core_types::app_config::app_config;
-use core_types::workspace_paths;
-use engine_host::onnx_asr::OnnxAsrEngine;
-use engine_host::onnx_tts::OnnxTtsEngine;
-use plugin_registry::ModelKind;
+use base64::Engine;
+use daemon::events::{DaemonEvent, EventBus};
+use extension_host::{ExtensionManifest, ExtensionProcess};
+use extension_registry::ModelKind;
+use serde_json::json;
+use syl_core::app_config::app_config;
+use syl_core::workspace_paths;
 
 use crate::local_models::{
     discover_onnx_asr_models, discover_onnx_tts_models, kind_for_path, registry_entries,
 };
 
-#[derive(Default)]
-pub struct OnnxAsrState {
-    loaded: Mutex<HashMap<String, Arc<Mutex<OnnxAsrEngine>>>>,
+const ASR_CAPABILITY: &str = "asr.transcribe/v1";
+const TTS_CAPABILITY: &str = "tts.synthesize/v1";
+
+fn f32_to_bytes(samples: &[f32]) -> Vec<u8> {
+    samples.iter().flat_map(|s| s.to_le_bytes()).collect()
 }
 
-impl OnnxAsrState {
-    pub fn get_loaded(&self, name: &str) -> Option<Arc<Mutex<OnnxAsrEngine>>> {
-        crate::sync::lock(&self.loaded).get(name).cloned()
-    }
-
-    pub fn loaded_names(&self) -> HashSet<String> {
-        crate::sync::lock(&self.loaded).keys().cloned().collect()
-    }
-
-    pub fn remove_loaded(&self, name: &str) {
-        crate::sync::lock(&self.loaded).remove(name);
-    }
+fn bytes_to_f32(bytes: &[u8]) -> Vec<f32> {
+    bytes
+        .chunks_exact(4)
+        .map(|chunk| f32::from_le_bytes([chunk[0], chunk[1], chunk[2], chunk[3]]))
+        .collect()
 }
 
-#[derive(Default)]
-pub struct OnnxTtsState {
-    loaded: Mutex<HashMap<String, Arc<Mutex<OnnxTtsEngine>>>>,
+macro_rules! extension_process_state {
+    ($state:ident) => {
+        #[derive(Default)]
+        pub struct $state {
+            loaded: Mutex<HashMap<String, Arc<ExtensionProcess>>>,
+            event_bus: Mutex<Option<Arc<EventBus>>>,
+        }
+
+        impl $state {
+            pub fn set_event_bus(&self, event_bus: Arc<EventBus>) {
+                *crate::sync::lock(&self.event_bus) = Some(event_bus);
+            }
+
+            fn publish_crashed(&self, name: &str) {
+                if let Some(bus) = crate::sync::lock(&self.event_bus).as_ref() {
+                    bus.publish(DaemonEvent::LocalModelCrashed {
+                        name: name.to_string(),
+                    });
+                }
+            }
+
+            pub fn get_loaded(&self, name: &str) -> Option<Arc<ExtensionProcess>> {
+                let mut loaded = crate::sync::lock(&self.loaded);
+                match loaded.get(name) {
+                    Some(process) if !process.is_alive() => {
+                        loaded.remove(name);
+                        drop(loaded);
+                        self.publish_crashed(name);
+                        None
+                    }
+                    Some(process) => Some(process.clone()),
+                    None => None,
+                }
+            }
+
+            pub fn loaded_names(&self) -> HashSet<String> {
+                let mut loaded = crate::sync::lock(&self.loaded);
+                let crashed = prune_dead(&mut loaded);
+                let result = loaded.keys().cloned().collect();
+                drop(loaded);
+                for name in crashed {
+                    self.publish_crashed(&name);
+                }
+                result
+            }
+
+            pub fn remove_loaded(&self, name: &str) {
+                crate::sync::lock(&self.loaded).remove(name);
+            }
+        }
+    };
 }
 
-impl OnnxTtsState {
-    pub fn get_loaded(&self, name: &str) -> Option<Arc<Mutex<OnnxTtsEngine>>> {
-        crate::sync::lock(&self.loaded).get(name).cloned()
-    }
+extension_process_state!(OnnxAsrState);
+extension_process_state!(OnnxTtsState);
 
-    pub fn loaded_names(&self) -> HashSet<String> {
-        crate::sync::lock(&self.loaded).keys().cloned().collect()
-    }
+fn prune_dead(loaded: &mut HashMap<String, Arc<ExtensionProcess>>) -> Vec<String> {
+    let dead: Vec<String> = loaded
+        .iter()
+        .filter(|(_, process)| !process.is_alive())
+        .map(|(name, _)| name.clone())
+        .collect();
+    loaded.retain(|_, process| process.is_alive());
+    dead
+}
 
-    pub fn remove_loaded(&self, name: &str) {
-        crate::sync::lock(&self.loaded).remove(name);
-    }
+fn build_asr_extension_manifest(
+    encoder_path: &std::path::Path,
+    decoder_path: &std::path::Path,
+    tokenizer_path: &std::path::Path,
+    engine_library_path: &std::path::Path,
+) -> Result<ExtensionManifest, String> {
+    let manifest = extension_host::find_extension("onnx-asr").ok_or_else(|| {
+        "the onnx-asr extension is not installed under .syl/extensions/".to_string()
+    })?;
+    extension_host::with_backend_args(
+        manifest,
+        vec![
+            "--library".to_string(),
+            engine_library_path.display().to_string(),
+            "--encoder".to_string(),
+            encoder_path.display().to_string(),
+            "--decoder".to_string(),
+            decoder_path.display().to_string(),
+            "--tokenizer".to_string(),
+            tokenizer_path.display().to_string(),
+        ],
+    )
+}
+
+fn build_tts_extension_manifest(
+    model_path: &std::path::Path,
+    vocab_path: &std::path::Path,
+    engine_library_path: &std::path::Path,
+) -> Result<ExtensionManifest, String> {
+    let manifest = extension_host::find_extension("onnx-tts").ok_or_else(|| {
+        "the onnx-tts extension is not installed under .syl/extensions/".to_string()
+    })?;
+    extension_host::with_backend_args(
+        manifest,
+        vec![
+            "--library".to_string(),
+            engine_library_path.display().to_string(),
+            "--model".to_string(),
+            model_path.display().to_string(),
+            "--vocab".to_string(),
+            vocab_path.display().to_string(),
+        ],
+    )
 }
 
 #[tauri::command]
-pub fn load_asr_model(name: String, state: tauri::State<'_, OnnxAsrState>) -> Result<(), String> {
-    if crate::sync::lock(&state.loaded).contains_key(&name) {
+pub async fn load_asr_model(
+    name: String,
+    state: tauri::State<'_, OnnxAsrState>,
+) -> Result<(), String> {
+    if state.get_loaded(&name).is_some() {
         return Ok(());
     }
 
@@ -77,36 +169,46 @@ pub fn load_asr_model(name: String, state: tauri::State<'_, OnnxAsrState>) -> Re
     }
 
     let onnx_engine_config = &app_config().onnx_engine;
-    let engine_library_path = plugin_registry::resolve_engine_library_path(
+    let engine_library_path = extension_registry::resolve_engine_library_path(
         &workspace_paths::registry_dir(),
         &workspace_paths::engines_dir(),
         &onnx_engine_config.id,
     )
     .map_err(|e| e.to_string())?;
 
-    let engine = OnnxAsrEngine::load(
-        &engine_library_path,
+    let manifest = build_asr_extension_manifest(
         &encoder_path,
         &decoder_path,
         &tokenizer_path,
-    )
-    .map_err(|e| e.to_string())?;
+        &engine_library_path,
+    )?;
 
-    crate::sync::lock(&state.loaded).insert(name, Arc::new(Mutex::new(engine)));
+    let process = ExtensionProcess::spawn(manifest)
+        .await
+        .map_err(|e| e.to_string())?;
+
+    crate::sync::lock(&state.loaded).insert(name, Arc::new(process));
     Ok(())
 }
 
 #[tauri::command]
-pub fn unload_asr_model(name: String, state: tauri::State<'_, OnnxAsrState>) -> Result<(), String> {
-    crate::sync::lock(&state.loaded)
+pub async fn unload_asr_model(
+    name: String,
+    state: tauri::State<'_, OnnxAsrState>,
+) -> Result<(), String> {
+    let process = crate::sync::lock(&state.loaded)
         .remove(&name)
-        .map(|_| ())
-        .ok_or_else(|| format!("{name} is not loaded"))
+        .ok_or_else(|| format!("{name} is not loaded"))?;
+    process.kill().await;
+    Ok(())
 }
 
 #[tauri::command]
-pub fn load_tts_model(name: String, state: tauri::State<'_, OnnxTtsState>) -> Result<(), String> {
-    if crate::sync::lock(&state.loaded).contains_key(&name) {
+pub async fn load_tts_model(
+    name: String,
+    state: tauri::State<'_, OnnxTtsState>,
+) -> Result<(), String> {
+    if state.get_loaded(&name).is_some() {
         return Ok(());
     }
 
@@ -132,26 +234,33 @@ pub fn load_tts_model(name: String, state: tauri::State<'_, OnnxTtsState>) -> Re
     }
 
     let onnx_engine_config = &app_config().onnx_engine;
-    let engine_library_path = plugin_registry::resolve_engine_library_path(
+    let engine_library_path = extension_registry::resolve_engine_library_path(
         &workspace_paths::registry_dir(),
         &workspace_paths::engines_dir(),
         &onnx_engine_config.id,
     )
     .map_err(|e| e.to_string())?;
 
-    let engine = OnnxTtsEngine::load(&engine_library_path, &model_path, &vocab_path)
+    let manifest = build_tts_extension_manifest(&model_path, &vocab_path, &engine_library_path)?;
+
+    let process = ExtensionProcess::spawn(manifest)
+        .await
         .map_err(|e| e.to_string())?;
 
-    crate::sync::lock(&state.loaded).insert(name, Arc::new(Mutex::new(engine)));
+    crate::sync::lock(&state.loaded).insert(name, Arc::new(process));
     Ok(())
 }
 
 #[tauri::command]
-pub fn unload_tts_model(name: String, state: tauri::State<'_, OnnxTtsState>) -> Result<(), String> {
-    crate::sync::lock(&state.loaded)
+pub async fn unload_tts_model(
+    name: String,
+    state: tauri::State<'_, OnnxTtsState>,
+) -> Result<(), String> {
+    let process = crate::sync::lock(&state.loaded)
         .remove(&name)
-        .map(|_| ())
-        .ok_or_else(|| format!("{name} is not loaded"))
+        .ok_or_else(|| format!("{name} is not loaded"))?;
+    process.kill().await;
+    Ok(())
 }
 
 #[tauri::command]
@@ -160,7 +269,7 @@ pub async fn transcribe_recording(
     seconds: f32,
     state: tauri::State<'_, OnnxAsrState>,
 ) -> Result<String, String> {
-    let engine = state
+    let process = state
         .get_loaded(&model)
         .ok_or_else(|| format!("asr model {model} is not loaded; load it first in Settings"))?;
 
@@ -170,13 +279,21 @@ pub async fn transcribe_recording(
             .map_err(|e| e.to_string())?
             .map_err(|e| e.to_string())?;
 
-    tauri::async_runtime::spawn_blocking(move || {
-        let mut engine = crate::sync::lock(&engine);
-        engine.transcribe(&pcm)
-    })
-    .await
-    .map_err(|e| e.to_string())?
-    .map_err(|e| e.to_string())
+    let pcm_base64 = base64::engine::general_purpose::STANDARD.encode(f32_to_bytes(&pcm));
+    let result = process
+        .call(
+            ASR_CAPABILITY,
+            "asr/transcribe",
+            json!({ "pcmBase64": pcm_base64 }),
+        )
+        .await
+        .map_err(|e| e.to_string())?;
+
+    result
+        .get("text")
+        .and_then(|v| v.as_str())
+        .map(str::to_string)
+        .ok_or_else(|| "asr-worker response missing text".to_string())
 }
 
 #[tauri::command]
@@ -185,17 +302,23 @@ pub async fn speak_text(
     text: String,
     state: tauri::State<'_, OnnxTtsState>,
 ) -> Result<(), String> {
-    let engine = state
+    let process = state
         .get_loaded(&model)
         .ok_or_else(|| format!("tts model {model} is not loaded; load it first in Settings"))?;
 
-    let pcm = tauri::async_runtime::spawn_blocking(move || {
-        let mut engine = crate::sync::lock(&engine);
-        engine.synthesize(&text)
-    })
-    .await
-    .map_err(|e| e.to_string())?
-    .map_err(|e| e.to_string())?;
+    let result = process
+        .call(TTS_CAPABILITY, "tts/synthesize", json!({ "text": text }))
+        .await
+        .map_err(|e| e.to_string())?;
+
+    let pcm_base64 = result
+        .get("pcmBase64")
+        .and_then(|v| v.as_str())
+        .ok_or_else(|| "tts-worker response missing pcmBase64".to_string())?;
+    let pcm_bytes = base64::engine::general_purpose::STANDARD
+        .decode(pcm_base64)
+        .map_err(|e| e.to_string())?;
+    let pcm = bytes_to_f32(&pcm_bytes);
 
     tauri::async_runtime::spawn_blocking(move || crate::audio::play_16khz_mono(&pcm))
         .await

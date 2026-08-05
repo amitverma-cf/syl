@@ -1,7 +1,7 @@
 use std::path::{Path, PathBuf};
 
-use core_types::workspace_paths;
-use plugin_registry::{DownloadSource, EngineEntry, ModelEntry};
+use extension_registry::{DownloadSource, EngineEntry, ModelEntry};
+use syl_core::workspace_paths;
 
 pub fn ensure_workspace_seeded() {
     migrate_legacy_workspace();
@@ -18,12 +18,14 @@ pub fn ensure_workspace_seeded() {
     tracing::info!(dir = %workspace_paths::workspace_root().display(), "seeding local .syl workspace");
 
     let repo_registry_dir = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../registry");
-    let base_engines = plugin_registry::load_engine_entries(&repo_registry_dir).unwrap_or_default();
-    let base_models = plugin_registry::load_model_entries(&repo_registry_dir).unwrap_or_default();
+    let base_engines =
+        extension_registry::load_engine_entries(&repo_registry_dir).unwrap_or_default();
+    let base_models =
+        extension_registry::load_model_entries(&repo_registry_dir).unwrap_or_default();
     let local_engines =
-        plugin_registry::load_local_engine_entries(&syl_registry_dir).unwrap_or_default();
+        extension_registry::load_local_engine_entries(&syl_registry_dir).unwrap_or_default();
     let local_models =
-        plugin_registry::load_local_model_entries(&syl_registry_dir).unwrap_or_default();
+        extension_registry::load_local_model_entries(&syl_registry_dir).unwrap_or_default();
 
     let seeded_engines: Vec<EngineEntry> = base_engines
         .into_iter()
@@ -110,41 +112,106 @@ fn copy_dir_recursive(source_dir: &Path, dest_dir: &Path) -> std::io::Result<()>
     Ok(())
 }
 
-/// Writes the `llama-cpp-chat` extension's manifest every launch (not a
-/// once-only seed like the registry/flows below) — its `backend.command`
+/// Writes every backend-worker extension's manifest every launch (not a
+/// once-only seed like the registry/flows below) — each `backend.command`
 /// path depends on where *this* run's own executable lives (dev build
 /// output dir vs. a packaged sidecar location), which can change between
 /// builds, so it needs to self-heal on every startup rather than go stale
 /// after the first run.
 fn seed_extensions() {
-    let Ok(engine_worker_path) = crate::local_models::resolve_engine_worker_binary_path() else {
-        tracing::warn!("could not resolve the engine-worker binary path; local chat models via the extension system will not load");
+    seed_worker_extension(
+        "llama-cpp-chat",
+        "llama.cpp Chat Engine",
+        "chat-worker",
+        vec!["inference.chat/v1".to_string()],
+    );
+    seed_worker_extension(
+        "stable-diffusion-image",
+        "Stable Diffusion Image Generator",
+        "image-worker",
+        vec!["image.generate/v1".to_string()],
+    );
+    seed_worker_extension(
+        "onnx-embedding",
+        "ONNX Embedding Engine",
+        "embedding-worker",
+        vec!["embedding.embed/v1".to_string()],
+    );
+    seed_worker_extension(
+        "onnx-asr",
+        "ONNX Speech-to-Text Engine",
+        "asr-worker",
+        vec!["asr.transcribe/v1".to_string()],
+    );
+    seed_worker_extension(
+        "onnx-tts",
+        "ONNX Text-to-Speech Engine",
+        "tts-worker",
+        vec!["tts.synthesize/v1".to_string()],
+    );
+    seed_flow_editor_extension();
+}
+
+fn seed_worker_extension(id: &str, display_name: &str, binary_name: &str, provides: Vec<String>) {
+    let Ok(worker_path) = crate::local_models::resolve_worker_binary_path(binary_name) else {
+        tracing::warn!(%id, "could not resolve the {binary_name} binary path; this extension will not load");
         return;
     };
 
     let manifest = extension_host::ExtensionManifest {
-        id: "llama-cpp-chat".to_string(),
+        id: id.to_string(),
         version: env!("CARGO_PKG_VERSION").to_string(),
-        display_name: "llama.cpp Chat Engine".to_string(),
-        backend: extension_host::ExtensionBackend {
-            command: engine_worker_path.display().to_string(),
+        display_name: display_name.to_string(),
+        backend: Some(extension_host::ExtensionBackend {
+            command: worker_path.display().to_string(),
             args: Vec::new(),
-        },
-        provides: vec!["inference.chat/v1".to_string()],
+        }),
+        provides,
         requires: Vec::new(),
         contributes: None,
     };
+    write_extension_manifest(id, &manifest);
+}
 
-    let dir = workspace_paths::extensions_dir().join("llama-cpp-chat");
+/// The Flow Editor is a UI-only extension: pure in-memory host-side logic
+/// with no FFI/crash risk to isolate, so it declares no `backend` — it only
+/// contributes a sidebar entry the host's generic contribution renderer
+/// picks up, instead of the entry point being hardcoded in the frontend.
+fn seed_flow_editor_extension() {
+    let manifest = extension_host::ExtensionManifest {
+        id: "flow-editor".to_string(),
+        version: env!("CARGO_PKG_VERSION").to_string(),
+        display_name: "Flows".to_string(),
+        backend: None,
+        provides: Vec::new(),
+        requires: Vec::new(),
+        contributes: Some(extension_host::Contributions {
+            settings_pane: None,
+            sidebar_view: Some(extension_host::UiContribution {
+                id: "flow-editor".to_string(),
+                title: "Flow Editor".to_string(),
+            }),
+            status_bar_item: None,
+            commands: vec![extension_host::UiContribution {
+                id: "open-flow-editor".to_string(),
+                title: "Open Flow Editor".to_string(),
+            }],
+        }),
+    };
+    write_extension_manifest("flow-editor", &manifest);
+}
+
+fn write_extension_manifest(id: &str, manifest: &extension_host::ExtensionManifest) {
+    let dir = workspace_paths::extensions_dir().join(id);
     if let Err(err) = std::fs::create_dir_all(&dir) {
-        tracing::error!(?err, "failed to create .syl/extensions/llama-cpp-chat");
+        tracing::error!(?err, %id, "failed to create .syl/extensions/{id}");
         return;
     }
-    let Ok(json) = serde_json::to_string_pretty(&manifest) else {
+    let Ok(json) = serde_json::to_string_pretty(manifest) else {
         return;
     };
     if let Err(err) = std::fs::write(dir.join("manifest.json"), json) {
-        tracing::error!(?err, "failed to write llama-cpp-chat extension manifest");
+        tracing::error!(?err, %id, "failed to write extension manifest");
     }
 }
 
@@ -179,14 +246,14 @@ fn seed_into(
     dest_dir: &Path,
     expected_sha256: Option<&str>,
 ) -> Option<PathBuf> {
-    match plugin_registry::resolve_download_url(download_url) {
+    match extension_registry::resolve_download_url(download_url) {
         Ok(DownloadSource::Local(source_path)) => {
             let source_dir = source_path.parent()?;
             copy_dir_files(source_dir, dest_dir).ok()?;
             Some(dest_dir.join(source_path.file_name()?))
         }
         Ok(DownloadSource::Remote(url)) => {
-            plugin_registry::download_to_cache(&url, dest_dir, expected_sha256).ok()
+            extension_registry::download_to_cache(&url, dest_dir, expected_sha256).ok()
         }
         Err(err) => {
             tracing::warn!(?err, url = %download_url, "skipping seed, source not resolvable");

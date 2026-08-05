@@ -3,7 +3,6 @@ use std::future::Future;
 use std::pin::Pin;
 use std::sync::{Arc, Mutex};
 
-use core_types::workspace_paths;
 use daemon::events::DaemonEvent;
 use daemon::jobs::{
     add_scheduled_job as persist_add_job, load_scheduled_jobs,
@@ -11,6 +10,7 @@ use daemon::jobs::{
 };
 use daemon::scheduler::{CronScheduler, Uuid};
 use memory::ConversationStore;
+use syl_core::workspace_paths;
 use tauri::{AppHandle, Manager};
 
 use crate::commands::{run_generate, run_generate_cloud, run_generate_with_process};

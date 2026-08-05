@@ -44,7 +44,13 @@
       }
     },
     "createUpdaterArtifacts": true,
-    "externalBin": ["binaries/engine-worker"]
+    "externalBin": [
+      "binaries/chat-worker",
+      "binaries/image-worker",
+      "binaries/embedding-worker",
+      "binaries/asr-worker",
+      "binaries/tts-worker"
+    ]
   },
   "plugins": {
     "updater": {

@@ -163,6 +163,17 @@ function ChatPanel({
     };
   }, []);
 
+  useEffect(() => {
+    const unlisten = listen<string>("local-model-crashed", (event) => {
+      toast.error(`Local model "${event.payload}" crashed and was unloaded`, {
+        description: "Reload it in Settings to continue using it.",
+      });
+    });
+    return () => {
+      unlisten.then((fn) => fn());
+    };
+  }, []);
+
   async function respondToPermission(response: "allowOnce" | "allowAlways" | "deny" | "denyAlways") {
     if (!permissionRequest) return;
     try {

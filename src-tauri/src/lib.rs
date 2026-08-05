@@ -1,6 +1,7 @@
 mod audio;
 mod bootstrap;
 mod commands;
+mod contributions;
 mod daemon;
 mod embeddings;
 mod flows;
@@ -20,16 +21,16 @@ mod updater;
 
 use std::sync::Arc;
 
-use core_types::workspace_paths;
 use daemon::DaemonState;
 use memory::SqliteConversationStore;
 use observability::ObservabilityState;
 use permission::TauriPermissionPrompter;
+use syl_core::workspace_paths;
 use tauri::menu::{Menu, MenuItem};
 use tauri::tray::TrayIconBuilder;
 use tauri::{Manager, WindowEvent};
 use tauri_plugin_autostart::MacosLauncher;
-use tool::{ReadFileTool, RunCommandTool, ToolExecutor, WriteFileTool};
+use tools::{ReadFileTool, RunCommandTool, ToolExecutor, WriteFileTool};
 
 pub struct AppState {
     pub conversation_store: Arc<SqliteConversationStore>,
@@ -107,6 +108,16 @@ pub fn run() {
             app.manage(speech::OnnxTtsState::default());
 
             app.manage(DaemonState::default());
+            let event_bus = app.state::<DaemonState>().event_bus.clone();
+            app.state::<local_models::LocalModelState>()
+                .set_event_bus(event_bus.clone());
+            app.state::<images::SdModelState>()
+                .set_event_bus(event_bus.clone());
+            app.state::<embeddings::OnnxModelState>()
+                .set_event_bus(event_bus.clone());
+            app.state::<speech::OnnxAsrState>()
+                .set_event_bus(event_bus.clone());
+            app.state::<speech::OnnxTtsState>().set_event_bus(event_bus);
             tauri::async_runtime::spawn(daemon::spawn(app.handle().clone()));
 
             let show_item = MenuItem::with_id(app, "show", "Show", true, None::<&str>)?;
@@ -166,6 +177,7 @@ pub fn run() {
             speech::transcribe_recording,
             speech::speak_text,
             observability::system_stats,
+            contributions::list_contributions,
             flows::list_flows,
             flows::load_flow,
             flows::flow_status,

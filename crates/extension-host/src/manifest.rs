@@ -9,7 +9,11 @@ pub struct ExtensionManifest {
     pub id: String,
     pub version: String,
     pub display_name: String,
-    pub backend: ExtensionBackend,
+    /// `None` for a UI-only extension (e.g. the Flow Editor): it declares
+    /// `contributes` but has no backend process for the host to spawn —
+    /// there's nothing to isolate since it's pure in-memory host-side logic.
+    #[serde(default)]
+    pub backend: Option<ExtensionBackend>,
     /// Capability IDs (e.g. `"inference.chat/v1"`) this extension implements
     /// — the host may call these methods on it.
     #[serde(default)]
@@ -19,8 +23,8 @@ pub struct ExtensionManifest {
     /// the host actually implements before the extension is ever spawned.
     #[serde(default)]
     pub requires: Vec<String>,
-    /// UI surfaces this extension contributes — schema-only this pass, see
-    /// `Contributions`.
+    /// UI surfaces this extension contributes — rendered generically by the
+    /// host (see `Contributions`).
     #[serde(default)]
     pub contributes: Option<Contributions>,
 }
@@ -34,12 +38,7 @@ pub struct ExtensionBackend {
 }
 
 /// UI surfaces an extension can declare, rendered by the *host's* own
-/// existing components rather than an extension-owned webview (the
-/// extension-ecosystem plan's "contribution points, not webviews" decision).
-/// Not implemented this pass — the reference chat extension contributes no
-/// UI — but kept real and typed now so a later pass has an actual contract
-/// to render against instead of inventing one from scratch alongside the
-/// first extension that needs it.
+/// existing components rather than an extension-owned webview.
 #[derive(Debug, Clone, Default, serde::Serialize, serde::Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct Contributions {
