@@ -1,7 +1,8 @@
 import { useEffect, useState } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import { toast } from "sonner";
-import { Button, Input } from "../ui";
+import { Button, Checkbox, Input, Select } from "../ui";
+import { useShellStore } from "../../store/shellStore";
 
 interface AppSettings {
   autostart: boolean;
@@ -21,6 +22,7 @@ function GeneralTab() {
   const [settings, setSettings] = useState<AppSettings | null>(null);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const { theme, setTheme } = useShellStore();
 
   useEffect(() => {
     invoke<AppSettings>("get_settings")
@@ -77,10 +79,25 @@ function GeneralTab() {
 
   return (
     <div>
+      <div className="settings-section-title">Appearance</div>
+      <div className="form-row">
+        <span style={{ width: 220, flexShrink: 0, fontSize: 12, color: "rgba(255,255,255,.7)" }}>
+          Theme
+        </span>
+        <Select
+          value={theme}
+          onChange={(e) => setTheme(e.currentTarget.value as "dark" | "light" | "system")}
+          style={{ width: 120 }}
+        >
+          <option value="system">System</option>
+          <option value="dark">Dark</option>
+          <option value="light">Light</option>
+        </Select>
+      </div>
+
       <div className="settings-section-title">Startup</div>
       <label className="form-row" style={{ cursor: "pointer" }}>
-        <input
-          type="checkbox"
+        <Checkbox
           checked={settings.autostart}
           disabled={saving}
           onChange={(e) => save({ ...settings, autostart: e.currentTarget.checked })}
@@ -90,8 +107,7 @@ function GeneralTab() {
 
       <div className="settings-section-title">Privacy</div>
       <label className="form-row" style={{ cursor: "pointer" }}>
-        <input
-          type="checkbox"
+        <Checkbox
           checked={settings.telemetryEnabled}
           disabled={saving}
           onChange={(e) => save({ ...settings, telemetryEnabled: e.currentTarget.checked })}

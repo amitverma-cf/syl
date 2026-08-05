@@ -67,6 +67,7 @@ function App() {
     onboardingOpen,
     setOnboardingOpen,
     onboardingDismissed,
+    theme,
   } = useShellStore();
 
   useEffect(() => {
@@ -112,7 +113,7 @@ function App() {
 
   return (
     <div className="shell-window" data-platform={useShellStore((s) => s.platform)}>
-      <Toaster theme="dark" position="bottom-right" toastOptions={{ style: { fontSize: 12.5 } }} />
+      <Toaster theme={theme} position="bottom-right" toastOptions={{ style: { fontSize: 12.5 } }} />
       <TopBar
         conversations={conversations}
         onNewChat={handleNewChat}
