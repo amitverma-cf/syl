@@ -1,3 +1,39 @@
+pub struct KnownCloudProvider {
+    pub name: &'static str,
+    pub env_var: &'static str,
+}
+
+pub const KNOWN_CLOUD_PROVIDERS: &[KnownCloudProvider] = &[
+    KnownCloudProvider {
+        name: "OpenAI",
+        env_var: "OPENAI_API_KEY",
+    },
+    KnownCloudProvider {
+        name: "Anthropic",
+        env_var: "ANTHROPIC_API_KEY",
+    },
+    KnownCloudProvider {
+        name: "Gemini",
+        env_var: "GEMINI_API_KEY",
+    },
+    KnownCloudProvider {
+        name: "Groq",
+        env_var: "GROQ_API_KEY",
+    },
+    KnownCloudProvider {
+        name: "xAI",
+        env_var: "XAI_API_KEY",
+    },
+    KnownCloudProvider {
+        name: "DeepSeek",
+        env_var: "DEEPSEEK_API_KEY",
+    },
+    KnownCloudProvider {
+        name: "Cohere",
+        env_var: "COHERE_API_KEY",
+    },
+];
+
 #[derive(Debug, Clone, serde::Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct CloudModel {

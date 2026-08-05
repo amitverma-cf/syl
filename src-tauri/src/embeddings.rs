@@ -5,7 +5,7 @@ use daemon::events::{DaemonEvent, EventBus};
 use extension_host::{ExtensionManifest, ExtensionProcess};
 use extension_registry::ModelKind;
 use serde_json::json;
-use syl_core::app_config::app_config;
+use syl_core::engine_ids::ONNX_ENGINE_ID;
 use syl_core::workspace_paths;
 
 use crate::local_models::{discover_onnx_embedding_models, kind_for_path, registry_entries};
@@ -133,11 +133,10 @@ pub async fn load_embedding_model(
         }
     }
 
-    let onnx_engine_config = &app_config().onnx_engine;
     let engine_library_path = extension_registry::resolve_engine_library_path(
         &workspace_paths::registry_dir(),
         &workspace_paths::engines_dir(),
-        &onnx_engine_config.id,
+        ONNX_ENGINE_ID,
     )
     .map_err(|e| e.to_string())?;
 

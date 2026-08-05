@@ -2,7 +2,18 @@ import { useEffect, useMemo, useState } from "react";
 import { useAutoGrowTextarea } from "../hooks/useAutoGrowTextarea";
 import { invoke } from "@tauri-apps/api/core";
 import { toast } from "sonner";
-import { IconButton, Button, Input, Textarea, Select, DropdownMenu, type DropdownMenuGroup } from "../components/ui";
+import {
+  IconButton,
+  Button,
+  Input,
+  Textarea,
+  Select,
+  DropdownMenu,
+  ConfirmDialog,
+  ErrorBanner,
+  type DropdownMenuGroup,
+} from "../components/ui";
+import { clickAsButtonProps } from "../hooks/clickAsButtonProps";
 import {
   IconPlus,
   IconTrash,
@@ -339,24 +350,27 @@ function FlowEditor({ cloudModels, providers, localModels }: FlowEditorProps) {
           <IconDeviceFloppy size={13} aria-hidden />
           Save
         </Button>
-        {savedName && confirmDeleteFlow && (
-          <Button variant="danger" onClick={() => setConfirmDeleteFlow(false)}>
-            Cancel
-          </Button>
-        )}
         {savedName && (
-          <IconButton
-            icon={IconTrash}
-            iconSize={14}
-            variant="danger"
-            data-testid="flow-delete-btn"
-            title={confirmDeleteFlow ? `Really delete "${savedName}"?` : "Delete flow from disk"}
-            onClick={handleDeleteFlow}
+          <ConfirmDialog
+            confirming={confirmDeleteFlow}
+            onRequestConfirm={handleDeleteFlow}
+            onConfirm={handleDeleteFlow}
+            onCancel={() => setConfirmDeleteFlow(false)}
+            className="ui-icon-btn ui-icon-btn-danger"
+            label={`delete flow "${savedName}" from disk`}
+            triggerIcon={<IconTrash size={14} aria-hidden />}
+            triggerTestId="flow-delete-btn"
+            confirmTestId="flow-delete-btn"
+            cancelTestId="flow-delete-cancel"
           />
         )}
       </div>
 
-      {error && <p className="settings-error" style={{ padding: "0 14px" }}>{error}</p>}
+      {error && (
+        <div style={{ padding: "0 14px" }}>
+          <ErrorBanner>{error}</ErrorBanner>
+        </div>
+      )}
 
       <div style={{ flex: 1, display: "flex", minHeight: 0 }}>
         <div style={{ flex: 1, overflow: "auto", position: "relative" }}>
@@ -400,7 +414,7 @@ function FlowEditor({ cloudModels, providers, localModels }: FlowEditorProps) {
             return (
               <div
                 key={s.name}
-                onClick={() => setSelected(s.name)}
+                {...clickAsButtonProps(() => setSelected(s.name), `State: ${s.name}`)}
                 style={{
                   position: "absolute",
                   left: pos.col * COL_WIDTH + 40,
@@ -409,7 +423,7 @@ function FlowEditor({ cloudModels, providers, localModels }: FlowEditorProps) {
                   minHeight: NODE_HEIGHT,
                   borderRadius: 12,
                   padding: "9px 11px",
-                  background: s.name === selected ? "rgba(169,194,255,0.16)" : "var(--bg-2)",
+                  background: s.name === selected ? "var(--accent-soft)" : "var(--bg-2)",
                   cursor: "pointer",
                   fontSize: 12,
                 }}
@@ -553,7 +567,7 @@ function FlowEditor({ cloudModels, providers, localModels }: FlowEditorProps) {
             <pre style={{ whiteSpace: "pre-wrap", margin: 0, maxHeight: 160, overflowY: "auto", color: "var(--text-1)" }}>
               {aiDraftRaw}
             </pre>
-            {aiDraftError && <p className="settings-error">{aiDraftError}</p>}
+            {aiDraftError && <ErrorBanner>{aiDraftError}</ErrorBanner>}
             <div style={{ display: "flex", gap: 6, marginTop: 8 }}>
               <Button data-testid="flow-ai-insert" onClick={handleInsertDraft}>
                 Insert into canvas
@@ -586,7 +600,10 @@ function FlowEditor({ cloudModels, providers, localModels }: FlowEditorProps) {
               open={aiModelMenuOpen}
               onOpenChange={setAiModelMenuOpen}
               trigger={
-                <div className="dropdown" onClick={() => setAiModelMenuOpen((v) => !v)}>
+                <div
+                  className="dropdown"
+                  {...clickAsButtonProps(() => setAiModelMenuOpen((v) => !v), "Select AI model")}
+                >
                   <span>{aiModelLabel}</span>
                   <IconChevronDown size={12} aria-hidden />
                 </div>
@@ -616,7 +633,7 @@ function FlowEditor({ cloudModels, providers, localModels }: FlowEditorProps) {
             <div
               data-testid="flow-ai-send"
               className={`send${!aiPrompt.trim() || aiBusy || !aiModel ? " disabled" : ""}`}
-              onClick={handleGenerate}
+              {...clickAsButtonProps(handleGenerate, "Generate flow draft with AI")}
             >
               <IconSend size={14} aria-hidden />
             </div>

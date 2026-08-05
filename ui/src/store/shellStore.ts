@@ -3,6 +3,7 @@ import { create } from "zustand";
 export type Platform = "mac" | "windows" | "linux" | "chromebook";
 export type SidebarTab = "chats" | "folder";
 export type ExtraTabType = "flow" | "text";
+export type Theme = "dark" | "light" | "system";
 
 export interface ExtraTab {
   id: string;
@@ -64,6 +65,22 @@ interface ShellState {
 
   contextUsage: Record<string, ContextUsage>;
   setContextUsage: (conversationId: string, usage: ContextUsage) => void;
+
+  theme: Theme;
+  setTheme: (t: Theme) => void;
+}
+
+function applyTheme(theme: Theme) {
+  if (theme === "system") {
+    document.documentElement.removeAttribute("data-theme");
+  } else {
+    document.documentElement.setAttribute("data-theme", theme);
+  }
+}
+
+function loadTheme(): Theme {
+  const stored = localStorage.getItem("syl:theme");
+  return stored === "dark" || stored === "light" || stored === "system" ? stored : "system";
 }
 
 export const useShellStore = create<ShellState>((set, get) => ({
@@ -144,4 +161,15 @@ export const useShellStore = create<ShellState>((set, get) => ({
   contextUsage: {},
   setContextUsage: (conversationId, usage) =>
     set((s) => ({ contextUsage: { ...s.contextUsage, [conversationId]: usage } })),
+
+  theme: (() => {
+    const initial = loadTheme();
+    applyTheme(initial);
+    return initial;
+  })(),
+  setTheme: (t) => {
+    localStorage.setItem("syl:theme", t);
+    applyTheme(t);
+    set({ theme: t });
+  },
 }));

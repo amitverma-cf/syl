@@ -15,12 +15,11 @@ import {
   IconChevronRight,
   IconChevronDown,
   IconLayoutSidebarLeftCollapse,
-  IconCheck,
-  IconX,
   IconPencil,
 } from "@tabler/icons-react";
 import { useShellStore } from "../store/shellStore";
-import { IconButton } from "../components/ui";
+import { ConfirmDialog, ErrorBanner, IconButton } from "../components/ui";
+import { clickAsButtonProps } from "../hooks/clickAsButtonProps";
 import type { ConversationSummary } from "../types";
 import { joinPath, parentOf, updateNode, type TreeNode } from "./folderTree";
 
@@ -260,7 +259,10 @@ function SidebarShell({ conversations, activeConversationId, onSelect, onDelete 
           <div
             className={`folder-item${node.isDir ? " dir" : ""}`}
             style={{ marginLeft: depth * 14 }}
-            onClick={() => (node.isDir ? toggleDir(node) : openFile(node))}
+            {...clickAsButtonProps(
+              () => (node.isDir ? toggleDir(node) : openFile(node)),
+              node.name,
+            )}
           >
             {node.isDir ? (
               node.expanded ? (
@@ -275,55 +277,32 @@ function SidebarShell({ conversations, activeConversationId, onSelect, onDelete 
             <span style={{ flex: 1, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
               {node.name}
             </span>
-            {confirmDeletePath === node.path ? (
-              <>
-                <span
-                  data-testid="node-delete-yes"
-                  className="conv-delete"
-                  style={{ opacity: 1, color: "#ff8783" }}
-                  onClick={(e) => {
-                    e.stopPropagation();
-                    deleteNode(node);
-                  }}
-                >
-                  <IconCheck size={12} aria-hidden />
-                </span>
-                <span
-                  data-testid="node-delete-no"
-                  className="conv-delete"
-                  style={{ opacity: 1 }}
-                  onClick={(e) => {
-                    e.stopPropagation();
-                    setConfirmDeletePath(null);
-                  }}
-                >
-                  <IconX size={12} aria-hidden />
-                </span>
-              </>
-            ) : (
-              <>
-                <IconPencil
-                  size={12}
-                  className="conv-delete"
-                  data-testid="node-rename-btn"
-                  aria-hidden
-                  onClick={(e) => {
-                    e.stopPropagation();
-                    startRename(node);
-                  }}
-                />
-                <IconTrash
-                  size={12}
-                  className="conv-delete"
-                  data-testid="node-delete-btn"
-                  aria-hidden
-                  onClick={(e) => {
-                    e.stopPropagation();
-                    deleteNode(node);
-                  }}
-                />
-              </>
+            {confirmDeletePath !== node.path && (
+              <button
+                type="button"
+                className="conv-delete"
+                data-testid="node-rename-btn"
+                aria-label={`Rename ${node.name}`}
+                onClick={(e) => {
+                  e.stopPropagation();
+                  startRename(node);
+                }}
+              >
+                <IconPencil size={12} aria-hidden />
+              </button>
             )}
+            <ConfirmDialog
+              confirming={confirmDeletePath === node.path}
+              onRequestConfirm={() => deleteNode(node)}
+              onConfirm={() => deleteNode(node)}
+              onCancel={() => setConfirmDeletePath(null)}
+              className="conv-delete"
+              label={`Delete ${node.name}`}
+              triggerIcon={<IconTrash size={12} aria-hidden />}
+              triggerTestId="node-delete-btn"
+              confirmTestId="node-delete-yes"
+              cancelTestId="node-delete-no"
+            />
           </div>
         )}
         {node.isDir && node.expanded && node.children && renderTree(node.children, depth + 1)}
@@ -366,14 +345,14 @@ function SidebarShell({ conversations, activeConversationId, onSelect, onDelete 
           <div className="sidebar-tabs">
             <div
               className={`sidebar-tab${sidebarTab === "chats" ? " active" : ""}`}
-              onClick={() => setSidebarTab("chats")}
+              {...clickAsButtonProps(() => setSidebarTab("chats"), "Chats")}
             >
               <IconMessages size={14} aria-hidden />
               Chats
             </div>
             <div
               className={`sidebar-tab${sidebarTab === "folder" ? " active" : ""}`}
-              onClick={() => setSidebarTab("folder")}
+              {...clickAsButtonProps(() => setSidebarTab("folder"), "Folder")}
             >
               <IconFolder size={14} aria-hidden />
               Folder
@@ -392,52 +371,45 @@ function SidebarShell({ conversations, activeConversationId, onSelect, onDelete 
             {conversations.map((c) =>
               confirmDeleteId === c.id ? (
                 <div key={c.id} className="conv active" data-testid="conv-delete-confirm">
-                  <span className="label" style={{ color: "#ff8783" }}>
+                  <span className="label" style={{ color: "var(--danger)" }}>
                     Delete "{c.title || "Untitled"}"?
                   </span>
-                  <span
-                    data-testid="conv-delete-yes"
-                    className="conv-delete"
-                    style={{ opacity: 1, color: "#ff8783" }}
-                    onClick={(e) => {
-                      e.stopPropagation();
+                  <ConfirmDialog
+                    confirming
+                    onRequestConfirm={() => {}}
+                    onConfirm={() => {
                       setConfirmDeleteId(null);
                       onDelete(c.id);
                     }}
-                  >
-                    <IconCheck size={13} aria-hidden />
-                  </span>
-                  <span
-                    data-testid="conv-delete-no"
+                    onCancel={() => setConfirmDeleteId(null)}
                     className="conv-delete"
-                    style={{ opacity: 1 }}
-                    onClick={(e) => {
-                      e.stopPropagation();
-                      setConfirmDeleteId(null);
-                    }}
-                  >
-                    <IconX size={13} aria-hidden />
-                  </span>
+                    label={`conversation "${c.title || "Untitled"}"`}
+                    triggerIcon={<IconTrash size={13} aria-hidden />}
+                    confirmTestId="conv-delete-yes"
+                    cancelTestId="conv-delete-no"
+                  />
                 </div>
               ) : (
                 <div
                   key={c.id}
                   className={`conv${c.id === activeConversationId ? " active" : ""}`}
-                  onClick={() => onSelect(c.id)}
+                  {...clickAsButtonProps(() => onSelect(c.id), c.title || "Untitled")}
                 >
                   <span className="label" title={c.title}>
                     {c.title || "Untitled"}
                   </span>
-                  <IconTrash
-                    size={13}
+                  <button
+                    type="button"
                     className="conv-delete"
                     data-testid="conv-delete-btn"
-                    aria-hidden
+                    aria-label={`Delete ${c.title || "Untitled"}`}
                     onClick={(e) => {
                       e.stopPropagation();
                       setConfirmDeleteId(c.id);
                     }}
-                  />
+                  >
+                    <IconTrash size={13} aria-hidden />
+                  </button>
                 </div>
               ),
             )}
@@ -448,12 +420,10 @@ function SidebarShell({ conversations, activeConversationId, onSelect, onDelete 
               <div className="empty-state" style={{ padding: "24px 10px" }}>
                 <IconFolderOpen size={26} aria-hidden />
                 <span>No folder opened</span>
-                <div className="es-action" onClick={openFolder}>
+                <div className="es-action" {...clickAsButtonProps(openFolder, "Open a folder")}>
                   Open a folder
                 </div>
-                {folderError && (
-                  <span style={{ color: "#ff8783", fontSize: 11 }}>{folderError}</span>
-                )}
+                {folderError && <ErrorBanner>{folderError}</ErrorBanner>}
               </div>
             ) : (
               <>
@@ -472,9 +442,7 @@ function SidebarShell({ conversations, activeConversationId, onSelect, onDelete 
                 <div className="folder-path" title={rootPath}>
                   {rootPath}
                 </div>
-                {folderError && (
-                  <div style={{ color: "#ff8783", fontSize: 11, padding: "2px 6px 6px" }}>{folderError}</div>
-                )}
+                {folderError && <ErrorBanner>{folderError}</ErrorBanner>}
                 {renderTree(tree, 0)}
                 {pendingCreate && pendingCreate.dir === rootPath && renderCreateRow(0)}
               </>
@@ -483,7 +451,10 @@ function SidebarShell({ conversations, activeConversationId, onSelect, onDelete 
         )}
 
         <div className="sidebar-footer">
-          <div className="settings-entry" onClick={() => openSettings("models")}>
+          <div
+            className="settings-entry"
+            {...clickAsButtonProps(() => openSettings("models"), "Settings")}
+          >
             <IconSettings size={15} aria-hidden />
             <span>Settings</span>
           </div>

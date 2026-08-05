@@ -3,11 +3,10 @@ use std::path::PathBuf;
 use std::sync::Mutex;
 
 use flow_engine::{parse_flow, Flow, FlowRunner};
-use syl_core::app_config::app_config;
 use syl_core::workspace_paths;
 
-pub fn default_flow_name() -> &'static str {
-    &app_config().default_flow_name
+pub fn default_flow_name() -> String {
+    crate::settings::load_settings().default_flow_name
 }
 
 #[derive(Default)]
@@ -51,7 +50,7 @@ impl FlowState {
     ) -> Result<FlowTurn, String> {
         let mut runners = crate::sync::lock(&self.runners);
         if !runners.contains_key(conversation_id) {
-            let runner = load_flow_runner(default_flow_name(), workspace_folder)?;
+            let runner = load_flow_runner(&default_flow_name(), workspace_folder)?;
             runners.insert(conversation_id.to_string(), runner);
         }
         let runner = runners.get(conversation_id).expect("just inserted above");

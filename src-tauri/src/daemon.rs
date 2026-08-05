@@ -4,7 +4,9 @@ use std::sync::Arc;
 
 use daemon::events::{DaemonEvent, EventBus};
 use daemon::scheduler::CronScheduler;
-use syl_core::app_config::app_config;
+use syl_core::registry_trust::{
+    REGISTRY_ALLOWED_HOSTS, REGISTRY_MANIFEST_PUBLIC_KEY, REGISTRY_POLL_URL,
+};
 use syl_core::workspace_paths;
 use tauri::{AppHandle, Emitter, Manager};
 
@@ -92,7 +94,7 @@ async fn poll_registry(event_bus: Arc<EventBus>) {
         // re-downloading, re-validating, and re-writing the full registry every 6
         // hours for no reason.
         let poll = extension_registry::fetch_remote_registry_conditional(
-            &app_config().registry_poll_url,
+            REGISTRY_POLL_URL,
             prev_engines_etag.as_deref(),
             prev_models_etag.as_deref(),
         )?;
@@ -114,43 +116,33 @@ async fn poll_registry(event_bus: Arc<EventBus>) {
             None => read_current(&registry_dir, "models.json")?,
         };
 
-        // Signature verification (provenance) is enabled whenever a public key is
-        // configured — fetched fresh alongside the manifests, verified against the
-        // exact bytes about to be validated/persisted, on top of the existing
-        // sha256/host-allowlist checks (integrity), which apply_remote_registry
-        // still runs regardless.
-        let public_key_hex = app_config().registry_manifest_public_key.clone();
-        let signatures = public_key_hex
-            .as_deref()
-            .map(|public_key_hex| {
-                extension_registry::fetch_registry_signatures(&app_config().registry_poll_url).map(
-                    |(engines_sig, models_sig)| {
-                        (public_key_hex.to_string(), engines_sig, models_sig)
-                    },
-                )
-            })
-            .transpose()?;
+        // Signature verification (provenance) — fetched fresh alongside the
+        // manifests, verified against the exact bytes about to be validated/
+        // persisted, on top of the existing sha256/host-allowlist checks
+        // (integrity), which apply_remote_registry still runs regardless.
+        let (engines_sig, models_sig) =
+            extension_registry::fetch_registry_signatures(REGISTRY_POLL_URL)?;
 
-        // Validate (host-allowlisted URLs, safe library_file paths, and — when a
-        // public key is configured — a valid Ed25519 signature over each file) and
-        // atomically persist only if the whole fetched pair passes — a poll that
-        // fails validation, or a network/parse error, leaves the last-known-good
-        // registry files exactly as they were, so a compromised or malformed
-        // response can never partially or fully overwrite what's already trusted.
+        // Validate (host-allowlisted URLs, safe library_file paths, and a
+        // valid Ed25519 signature over each file) and atomically persist only
+        // if the whole fetched pair passes — a poll that fails validation, or
+        // a network/parse error, leaves the last-known-good registry files
+        // exactly as they were, so a compromised or malformed response can
+        // never partially or fully overwrite what's already trusted.
+        let allowed_hosts: Vec<String> = REGISTRY_ALLOWED_HOSTS
+            .iter()
+            .map(|h| h.to_string())
+            .collect();
         extension_registry::apply_remote_registry(
             &registry_dir,
             &engines_json,
             &models_json,
-            &app_config().registry_allowed_hosts,
-            signatures
-                .as_ref()
-                .map(|(public_key_hex, engines_sig, models_sig)| {
-                    extension_registry::RegistrySignatures {
-                        public_key_hex,
-                        engines_signature_hex: engines_sig,
-                        models_signature_hex: models_sig,
-                    }
-                }),
+            &allowed_hosts,
+            Some(extension_registry::RegistrySignatures {
+                public_key_hex: REGISTRY_MANIFEST_PUBLIC_KEY,
+                engines_signature_hex: &engines_sig,
+                models_signature_hex: &models_sig,
+            }),
         )?;
 
         if let Some(etag) = &poll.engines_etag {

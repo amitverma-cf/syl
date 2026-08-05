@@ -14,7 +14,8 @@ import {
   IconArrowUp,
   IconChevronDown,
 } from "@tabler/icons-react";
-import { Button, DropdownMenu, Input, type DropdownMenuGroup } from "./ui";
+import { Button, DropdownMenu, ErrorBanner, Input, type DropdownMenuGroup } from "./ui";
+import { clickAsButtonProps } from "../hooks/clickAsButtonProps";
 import type {
   CloudModel,
   FlowStateInfo,
@@ -251,8 +252,8 @@ function ChatPanel({
     }
   }
 
-  async function handleSubmit(e: React.SyntheticEvent) {
-    e.preventDefault();
+  async function handleSubmit(e?: React.SyntheticEvent) {
+    e?.preventDefault();
     if (!prompt.trim() || isGenerating || !selectedModel) return;
 
     if (isLocalModel && !selectedLocalModelLoaded) {
@@ -435,16 +436,25 @@ function ChatPanel({
             <code>{JSON.stringify(permissionRequest.args)}</code>?
           </div>
           <div className="pb-actions">
-            <div className="pb-btn primary" onClick={() => respondToPermission("allowOnce")}>
+            <div
+              className="pb-btn primary"
+              {...clickAsButtonProps(() => respondToPermission("allowOnce"), "Allow once")}
+            >
               Allow once
             </div>
-            <div className="pb-btn" onClick={() => respondToPermission("allowAlways")}>
+            <div
+              className="pb-btn"
+              {...clickAsButtonProps(() => respondToPermission("allowAlways"), "Allow always")}
+            >
               Allow always
             </div>
-            <div className="pb-btn" onClick={() => respondToPermission("deny")}>
+            <div className="pb-btn" {...clickAsButtonProps(() => respondToPermission("deny"), "Deny")}>
               Deny
             </div>
-            <div className="pb-btn" onClick={() => respondToPermission("denyAlways")}>
+            <div
+              className="pb-btn"
+              {...clickAsButtonProps(() => respondToPermission("denyAlways"), "Deny always")}
+            >
               Deny always
             </div>
           </div>
@@ -469,13 +479,21 @@ function ChatPanel({
             <div className="msg-row user" key={i}>
               <div className="msg-user-box">{m.content}</div>
               <div className="msg-actions">
-                <div className="msg-action" title="Copy" onClick={() => handleCopy(m.content)}>
+                <div
+                  className="msg-action"
+                  title="Copy"
+                  {...clickAsButtonProps(() => handleCopy(m.content), "Copy message")}
+                >
                   <IconCopy size={13} aria-hidden />
                 </div>
-                <div className="msg-action" title="Split into new chat">
+                <div
+                  className="msg-action"
+                  title="Split into new chat"
+                  {...clickAsButtonProps(() => {}, "Split into new chat")}
+                >
                   <IconGitBranch size={13} aria-hidden />
                 </div>
-                <div className="msg-action" title="Undo">
+                <div className="msg-action" title="Undo" {...clickAsButtonProps(() => {}, "Undo")}>
                   <IconArrowBackUp size={13} aria-hidden />
                 </div>
                 <span className="msg-time">{new Date(m.createdAt * 1000).toLocaleTimeString()}</span>
@@ -487,10 +505,18 @@ function ChatPanel({
                 <ReactMarkdown remarkPlugins={[remarkGfm]}>{m.content || "…"}</ReactMarkdown>
               </div>
               <div className="msg-actions">
-                <div className="msg-action" title="Copy" onClick={() => handleCopy(m.content)}>
+                <div
+                  className="msg-action"
+                  title="Copy"
+                  {...clickAsButtonProps(() => handleCopy(m.content), "Copy message")}
+                >
                   <IconCopy size={13} aria-hidden />
                 </div>
-                <div className="msg-action" title="Read aloud" onClick={() => handleSpeak(m.content)}>
+                <div
+                  className="msg-action"
+                  title="Read aloud"
+                  {...clickAsButtonProps(() => handleSpeak(m.content), "Read message aloud")}
+                >
                   <IconVolume size={13} aria-hidden />
                 </div>
                 <span className="msg-time">{new Date(m.createdAt * 1000).toLocaleTimeString()}</span>
@@ -501,7 +527,11 @@ function ChatPanel({
         )}
       </div>
 
-      {error && !noChatModel && <p style={{ color: "#ff8783", fontSize: 12, padding: "0 18px" }}>{error}</p>}
+      {error && !noChatModel && (
+        <div style={{ padding: "0 18px" }}>
+          <ErrorBanner>{error}</ErrorBanner>
+        </div>
+      )}
       {noChatModel && (
         <div className="empty-state" style={{ flex: "none", padding: "8px 18px" }}>
           <span>No chat model set up yet — download one from Settings.</span>
@@ -540,7 +570,7 @@ function ChatPanel({
               <div
                 className={`composer-btn${isRecording ? " active" : ""}`}
                 title="Record"
-                onClick={handleRecordAndTranscribe}
+                {...clickAsButtonProps(handleRecordAndTranscribe, "Record voice message")}
               >
                 <IconMicrophone size={15} aria-hidden />
               </div>
@@ -549,7 +579,7 @@ function ChatPanel({
               <div
                 className={`composer-btn${isGeneratingImage ? " active" : ""}`}
                 title="Generate image from prompt"
-                onClick={handleGenerateImage}
+                {...clickAsButtonProps(handleGenerateImage, "Generate image from prompt")}
               >
                 <IconPhoto size={15} aria-hidden />
               </div>
@@ -600,7 +630,10 @@ function ChatPanel({
                 open={modelMenuOpen}
                 onOpenChange={setModelMenuOpen}
                 trigger={
-                  <div className="dropdown" onClick={() => setModelMenuOpen((v) => !v)}>
+                  <div
+                    className="dropdown"
+                    {...clickAsButtonProps(() => setModelMenuOpen((v) => !v), "Select model")}
+                  >
                     <span>{selectedModelLabel}</span>
                     <IconChevronDown size={13} aria-hidden />
                   </div>
@@ -646,7 +679,7 @@ function ChatPanel({
 
             <div
               className={`send${!prompt.trim() || isGenerating || isLoadingModel || !selectedModel ? " disabled" : ""}`}
-              onClick={handleSubmit}
+              {...clickAsButtonProps(() => handleSubmit(), "Send message")}
             >
               <IconArrowUp size={16} aria-hidden />
             </div>

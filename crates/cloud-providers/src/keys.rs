@@ -1,7 +1,7 @@
 use std::collections::BTreeMap;
 use std::path::Path;
 
-use syl_core::app_config::app_config;
+use crate::catalog::KNOWN_CLOUD_PROVIDERS;
 
 #[derive(Debug, Clone, serde::Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -64,15 +64,12 @@ pub fn delete_api_key(path: &Path, env_var: &str) -> std::io::Result<()> {
 
 pub fn list_providers(path: &Path) -> Vec<ProviderInfo> {
     let entries = load_env_file(path);
-    app_config()
-        .known_cloud_providers
+    KNOWN_CLOUD_PROVIDERS
         .iter()
         .map(|provider| ProviderInfo {
-            name: provider.name.clone(),
-            env_var: provider.env_var.clone(),
-            configured: entries
-                .get(&provider.env_var)
-                .is_some_and(|v| !v.is_empty()),
+            name: provider.name.to_string(),
+            env_var: provider.env_var.to_string(),
+            configured: entries.get(provider.env_var).is_some_and(|v| !v.is_empty()),
         })
         .collect()
 }

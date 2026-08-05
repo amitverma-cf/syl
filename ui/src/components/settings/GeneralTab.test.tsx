@@ -11,6 +11,14 @@ const defaultSettings = {
   autostart: false,
   telemetryEnabled: false,
   maxConcurrentLocalModels: 3,
+  defaultFlowName: "default",
+  maxToolIterations: 8,
+  contextBudgetChars: 12000,
+  localEngineContextSize: 2048,
+  localEngineMaxTokens: 128,
+  imageEngineSteps: 20,
+  imageEngineWidth: 512,
+  imageEngineHeight: 512,
 };
 
 function mockInvoke(settings = defaultSettings) {

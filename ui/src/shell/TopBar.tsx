@@ -19,6 +19,7 @@ import { useShellStore } from "../store/shellStore";
 import type { ConversationSummary } from "../types";
 import { useTabScroll } from "./useTabScroll";
 import { useContributions } from "../hooks/useContributions";
+import { clickAsButtonProps } from "../hooks/clickAsButtonProps";
 
 // Icons for known sidebar-view contribution ids. An extension whose id isn't
 // listed here still renders (falls back to a generic icon) — this map only
@@ -65,6 +66,8 @@ function TopBar({ conversations, onNewChat, onOpenFlowEditor }: TopBarProps) {
     setActiveTab,
     closeTab,
     setOnboardingOpen,
+    theme,
+    setTheme,
   } = useShellStore();
 
   const menuRef = useRef<HTMLDivElement>(null);
@@ -95,53 +98,70 @@ function TopBar({ conversations, onNewChat, onOpenFlowEditor }: TopBarProps) {
   return (
     <div className="app-topbar" data-tauri-drag-region>
       <div ref={menuRef} style={{ position: "relative" }}>
-        <div className="topbar-btn" onClick={() => setAppMenuOpen(!appMenuOpen)} title="Menu">
+        <div
+          className="topbar-btn"
+          title="Menu"
+          {...clickAsButtonProps(() => setAppMenuOpen(!appMenuOpen), "Menu")}
+        >
           <IconMenu2 size={16} aria-hidden />
         </div>
         <div className={`app-menu${appMenuOpen ? " open" : ""}`}>
           <div
             className="app-menu-item"
-            onClick={() => {
+            {...clickAsButtonProps(() => {
               setAppMenuOpen(false);
               setCmdkOpen(true);
-            }}
+            }, "Command palette")}
           >
             Command palette <span style={{ float: "right", opacity: 0.5 }}>⌘K</span>
           </div>
           <div
             className="app-menu-item"
-            onClick={() => {
+            {...clickAsButtonProps(() => {
               setAppMenuOpen(false);
               setOnboardingOpen(true);
-            }}
+            }, "Show welcome guide")}
           >
             Show welcome guide
           </div>
           <div
             className="app-menu-item"
+            {...clickAsButtonProps(() => {
+              const next = theme === "dark" ? "light" : theme === "light" ? "system" : "dark";
+              setTheme(next);
+            }, `Theme, currently ${theme}`)}
+          >
+            Theme <span style={{ float: "right", opacity: 0.5 }}>{theme}</span>
+          </div>
+          <div
+            className="app-menu-item"
             data-testid="app-menu-quit"
-            onClick={() => {
+            {...clickAsButtonProps(() => {
               setAppMenuOpen(false);
               invoke("quit_app");
-            }}
+            }, "Quit")}
           >
             Quit
           </div>
         </div>
       </div>
 
-      <div className="topbar-btn" onClick={toggleSidebar} title="Toggle sidebar">
+      <div className="topbar-btn" title="Toggle sidebar" {...clickAsButtonProps(toggleSidebar, "Toggle sidebar")}>
         <IconLayoutSidebar size={16} aria-hidden />
       </div>
 
       <div className="app-title">syl</div>
 
-      <div className="topbar-btn" onClick={() => setCmdkOpen(true)} title="Search (⌘K)">
+      <div
+        className="topbar-btn"
+        title="Search (⌘K)"
+        {...clickAsButtonProps(() => setCmdkOpen(true), "Search")}
+      >
         <IconSearch size={15} aria-hidden />
       </div>
 
       <div ref={addMenuRef} style={{ position: "relative" }}>
-        <div className="topbar-btn" onClick={onNewChat} title="New chat">
+        <div className="topbar-btn" title="New chat" {...clickAsButtonProps(onNewChat, "New chat")}>
           <IconPlus size={16} aria-hidden />
         </div>
       </div>
@@ -153,8 +173,8 @@ function TopBar({ conversations, onNewChat, onOpenFlowEditor }: TopBarProps) {
           <div
             key={contribution.id}
             className="topbar-btn"
-            onClick={handler}
             title={`Open ${contribution.title.toLowerCase()}`}
+            {...clickAsButtonProps(handler, `Open ${contribution.title}`)}
           >
             <Icon size={15} aria-hidden />
           </div>
@@ -163,7 +183,10 @@ function TopBar({ conversations, onNewChat, onOpenFlowEditor }: TopBarProps) {
 
       <div className="tab-scroll">
         {showLeft && (
-          <div className="tab-chevron" onClick={() => scrollByStep(-1)}>
+          <div
+            className="tab-chevron"
+            {...clickAsButtonProps(() => scrollByStep(-1), "Scroll tabs left")}
+          >
             <IconChevronLeft size={14} aria-hidden />
           </div>
         )}
@@ -172,16 +195,26 @@ function TopBar({ conversations, onNewChat, onOpenFlowEditor }: TopBarProps) {
             <div
               key={id}
               className={`chat-tab${activeTab === id ? " active" : ""}`}
-              onClick={() => setActiveTab(id)}
               title={tabLabel(id)}
+              {...clickAsButtonProps(() => setActiveTab(id), tabLabel(id))}
             >
               {tabIcon(tabType(id))}
               <span className="label">{tabLabel(id)}</span>
               <span
                 className="tab-close"
+                role="button"
+                tabIndex={0}
+                aria-label={`Close ${tabLabel(id)}`}
                 onClick={(e) => {
                   e.stopPropagation();
                   closeTab(id);
+                }}
+                onKeyDown={(e) => {
+                  if (e.key === "Enter" || e.key === " ") {
+                    e.preventDefault();
+                    e.stopPropagation();
+                    closeTab(id);
+                  }
                 }}
               >
                 <IconX size={11} aria-hidden />
@@ -190,7 +223,7 @@ function TopBar({ conversations, onNewChat, onOpenFlowEditor }: TopBarProps) {
           ))}
         </div>
         {showRight && (
-          <div className="tab-chevron" onClick={() => scrollByStep(1)}>
+          <div className="tab-chevron" {...clickAsButtonProps(() => scrollByStep(1), "Scroll tabs right")}>
             <IconChevronRight size={14} aria-hidden />
           </div>
         )}
@@ -199,19 +232,37 @@ function TopBar({ conversations, onNewChat, onOpenFlowEditor }: TopBarProps) {
       <div className="win-controls">
         {platform === "mac" && (
           <div className="traffic">
-            <div className="dot close" onClick={() => appWindow?.close()} />
-            <div className="dot min" onClick={() => appWindow?.minimize()} />
-            <div className="dot max" onClick={() => appWindow?.toggleMaximize()} />
+            <div
+              className="dot close"
+              {...clickAsButtonProps(() => appWindow?.close(), "Close window")}
+            />
+            <div
+              className="dot min"
+              {...clickAsButtonProps(() => appWindow?.minimize(), "Minimize window")}
+            />
+            <div
+              className="dot max"
+              {...clickAsButtonProps(() => appWindow?.toggleMaximize(), "Maximize window")}
+            />
           </div>
         )}
         <div className="win-buttons">
-          <div className="win-btn" onClick={() => appWindow?.minimize()}>
+          <div
+            className="win-btn"
+            {...clickAsButtonProps(() => appWindow?.minimize(), "Minimize window")}
+          >
             <IconMinus size={13} aria-hidden />
           </div>
-          <div className="win-btn" onClick={() => appWindow?.toggleMaximize()}>
+          <div
+            className="win-btn"
+            {...clickAsButtonProps(() => appWindow?.toggleMaximize(), "Maximize window")}
+          >
             <IconSquare size={11} aria-hidden />
           </div>
-          <div className="win-btn close-btn" onClick={() => appWindow?.close()}>
+          <div
+            className="win-btn close-btn"
+            {...clickAsButtonProps(() => appWindow?.close(), "Close window")}
+          >
             <IconX size={13} aria-hidden />
           </div>
         </div>

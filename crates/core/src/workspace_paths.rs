@@ -93,10 +93,8 @@ pub fn scheduled_jobs_file() -> PathBuf {
     workspace_root().join("scheduled_jobs.json")
 }
 
-/// Genuinely user-adjustable app settings (autostart, resource limits,
-/// telemetry opt-in/out) — distinct from `config/app.json`, which is
-/// committed, build-time, repo-level config the app ships with and never
-/// writes back to.
+/// Every user-adjustable app setting (autostart, resource limits, telemetry
+/// opt-in/out, engine tuning) — see `AppSettings` in `src-tauri/src/settings.rs`.
 pub fn settings_file() -> PathBuf {
     workspace_root().join("settings.json")
 }

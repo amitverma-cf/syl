@@ -5,7 +5,7 @@ use std::sync::{Arc, Mutex};
 use daemon::events::{DaemonEvent, EventBus};
 use extension_host::{ExtensionManifest, ExtensionProcess};
 use extension_registry::{resolve_local_path, ModelEntry, ModelKind};
-use syl_core::app_config::app_config;
+use syl_core::engine_ids::{IMAGE_ENGINE_ID, LOCAL_CHAT_ENGINE_ID, ONNX_ENGINE_ID};
 use syl_core::workspace_paths;
 
 #[derive(Default)]
@@ -222,7 +222,7 @@ fn read_gguf_quantization(path: &Path) -> String {
     let Ok(library_path) = extension_registry::resolve_engine_library_path(
         &workspace_paths::registry_dir(),
         &workspace_paths::engines_dir(),
-        &app_config().local_engine.id,
+        LOCAL_CHAT_ENGINE_ID,
     ) else {
         return "unknown".to_string();
     };
@@ -364,11 +364,11 @@ pub fn set_local_model_kind(name: String, kind: ModelKind) -> Result<(), String>
 
     let required_engine = match family {
         ModelFamily::OnnxEmbedding | ModelFamily::OnnxAsr | ModelFamily::OnnxTts => {
-            app_config().onnx_engine.id.clone()
+            ONNX_ENGINE_ID.to_string()
         }
         ModelFamily::Gguf => match kind {
-            ModelKind::Chat | ModelKind::Embedding => app_config().local_engine.id.clone(),
-            ModelKind::Image => app_config().sd_engine.id.clone(),
+            ModelKind::Chat | ModelKind::Embedding => LOCAL_CHAT_ENGINE_ID.to_string(),
+            ModelKind::Image => IMAGE_ENGINE_ID.to_string(),
             ModelKind::Asr | ModelKind::Tts => {
                 return Err(format!(
                     "{name} is a .gguf model and cannot be marked as {kind:?}"
@@ -446,18 +446,17 @@ pub async fn load_local_model(
         }
     }
 
-    let local_engine_config = &app_config().local_engine;
     let engine_library_path = extension_registry::resolve_engine_library_path(
         &workspace_paths::registry_dir(),
         &workspace_paths::engines_dir(),
-        &local_engine_config.id,
+        LOCAL_CHAT_ENGINE_ID,
     )
     .map_err(|e| e.to_string())?;
 
     let manifest = build_chat_extension_manifest(
         &model_path,
         &engine_library_path,
-        local_engine_config.context_size,
+        crate::settings::load_settings().local_engine_context_size,
     )?;
 
     // The model now loads in its own isolated `chat-worker` process — if
@@ -489,7 +488,7 @@ pub async fn count_local_tokens(
 /// The context window (in tokens) the local chat engine is configured with.
 #[tauri::command]
 pub fn local_context_size() -> i32 {
-    app_config().local_engine.context_size as i32
+    crate::settings::load_settings().local_engine_context_size as i32
 }
 
 #[tauri::command]

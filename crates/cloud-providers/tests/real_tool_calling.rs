@@ -53,6 +53,7 @@ async fn model_calls_read_file_tool_and_uses_its_real_content() {
         &tools,
         &executor,
         "real-tool-calling-test",
+        8,
         |piece| pieces.push(piece.to_string()),
     )
     .await
