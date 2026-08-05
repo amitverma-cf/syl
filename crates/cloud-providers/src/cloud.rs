@@ -7,7 +7,6 @@ use genai::chat::{
 };
 use genai::resolver::{AuthData, AuthResolver, Endpoint, ServiceTargetResolver};
 use genai::{Client, ModelIden, ServiceTarget};
-use syl_core::app_config::app_config;
 
 use crate::custom::list_custom_providers;
 use crate::keys::load_env_file;
@@ -108,6 +107,7 @@ pub async fn chat_with_tools(
     tools: &[tools::ToolSpec],
     executor: &tools::ToolExecutor,
     conversation_id: &str,
+    max_tool_iterations: u32,
     mut on_piece: impl FnMut(&str),
 ) -> Result<String, CloudChatError> {
     let mut messages = Vec::new();
@@ -125,7 +125,6 @@ pub async fn chat_with_tools(
         })
         .collect();
 
-    let max_tool_iterations = app_config().max_tool_iterations;
     for _ in 0..max_tool_iterations {
         let mut request = ChatRequest::new(messages.clone());
         if !genai_tools.is_empty() {

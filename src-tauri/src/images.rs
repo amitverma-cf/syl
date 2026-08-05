@@ -6,7 +6,7 @@ use daemon::events::{DaemonEvent, EventBus};
 use extension_host::{ExtensionManifest, ExtensionProcess};
 use extension_registry::ModelKind;
 use serde_json::json;
-use syl_core::app_config::app_config;
+use syl_core::engine_ids::IMAGE_ENGINE_ID;
 use syl_core::workspace_paths;
 
 use crate::local_models::{discover_gguf_models, kind_for_path, registry_entries};
@@ -98,11 +98,10 @@ pub async fn load_image_model(
         }
     }
 
-    let sd_engine_config = &app_config().sd_engine;
     let engine_library_path = extension_registry::resolve_engine_library_path(
         &workspace_paths::registry_dir(),
         &workspace_paths::engines_dir(),
-        &sd_engine_config.id,
+        IMAGE_ENGINE_ID,
     )
     .map_err(|e| e.to_string())?;
 
@@ -145,11 +144,11 @@ pub async fn generate_image(
         .get_loaded(&model)
         .ok_or_else(|| format!("image model {model} is not loaded; load it first in Settings"))?;
 
-    let sd_engine_config = &app_config().sd_engine;
+    let settings = crate::settings::load_settings();
     let (steps, width, height) = (
-        sd_engine_config.steps,
-        sd_engine_config.width,
-        sd_engine_config.height,
+        settings.image_engine_steps,
+        settings.image_engine_width,
+        settings.image_engine_height,
     );
 
     let result = process

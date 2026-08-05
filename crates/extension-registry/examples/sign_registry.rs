@@ -6,7 +6,7 @@
 //!   `generate-key`
 //!       Prints a new random Ed25519 keypair (hex secret + public key). Keep
 //!       the secret key offline; publish the public key into
-//!       `config/app.json`'s `registryManifestPublicKey`.
+//!       `syl_core::registry_trust::REGISTRY_MANIFEST_PUBLIC_KEY`.
 //!   `sign <secret-key-hex> <file>`
 //!       Prints the hex-encoded detached signature of `file`'s bytes.
 

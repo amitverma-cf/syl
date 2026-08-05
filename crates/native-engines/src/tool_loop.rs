@@ -1,5 +1,4 @@
 use serde_json::Value;
-use syl_core::app_config::app_config;
 
 use crate::llama::LlamaEngine;
 
@@ -12,6 +11,7 @@ pub fn generate_with_tools(
     executor: &tools::ToolExecutor,
     conversation_id: &str,
     max_tokens: i32,
+    max_tool_iterations: u32,
     mut on_piece: impl FnMut(&str),
 ) -> Result<String, String> {
     let mut running_prompt = format!(
@@ -19,7 +19,6 @@ pub fn generate_with_tools(
         tool_catalog_prompt(tools)
     );
 
-    let max_tool_iterations = app_config().max_tool_iterations;
     for _ in 0..max_tool_iterations {
         let output = engine
             .generate(&running_prompt, max_tokens, &mut on_piece)

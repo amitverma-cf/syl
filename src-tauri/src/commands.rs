@@ -7,7 +7,6 @@ use memory::{
     ConversationStore, ConversationSummary, EmbeddingStore, Message, SqliteConversationStore,
     ToolPermissionDecision, ToolPermissionStore,
 };
-use syl_core::app_config::app_config;
 use syl_core::workspace_paths;
 use tauri::ipc::{Channel, Response};
 use tools::ToolExecutor;
@@ -261,7 +260,7 @@ pub async fn generate_flow_draft(
                 format!("local model {name} is not loaded; load it first in Settings")
             })?;
             let full_prompt = format!("{FLOW_GEN_SYSTEM_PROMPT}\n\nUser: {prompt}\nAssistant:");
-            let max_tokens = app_config().local_engine.max_tokens;
+            let max_tokens = crate::settings::load_settings().local_engine_max_tokens;
             process
                 .generate(&full_prompt, max_tokens, |_piece: &str| {})
                 .await
@@ -299,7 +298,7 @@ pub fn create_conversation(
 ) -> Result<(), String> {
     state
         .conversation_store
-        .create_conversation(&id, &title, default_flow_name())
+        .create_conversation(&id, &title, &default_flow_name())
         .map_err(|e| e.to_string())
 }
 
@@ -405,7 +404,7 @@ pub fn clear_tool_permission(
 /// whole conversation unbounded on every turn.
 fn compressed_history_block(store: &Arc<SqliteConversationStore>, conversation_id: &str) -> String {
     let messages = store.list_messages(conversation_id).unwrap_or_default();
-    let budget = app_config().context_budget_chars;
+    let budget = crate::settings::load_settings().context_budget_chars;
     let compressed = tools::compress_context(&messages, budget);
     if compressed.is_empty() {
         return String::new();
@@ -559,6 +558,7 @@ pub(crate) async fn run_generate_cloud(
         tools,
         executor,
         conversation_id,
+        crate::settings::load_settings().max_tool_iterations,
         |piece| on_piece(piece),
     )
     .await
@@ -601,7 +601,7 @@ pub(crate) async fn run_generate(
     let manifest = crate::local_models::build_chat_extension_manifest(
         &resolved.model_path,
         &resolved.engine_library_path,
-        app_config().local_engine.context_size,
+        crate::settings::load_settings().local_engine_context_size,
     )?;
     let process = ExtensionProcess::spawn(manifest)
         .await
@@ -645,7 +645,7 @@ pub(crate) async fn run_generate_with_process(
         tools,
         executor,
         conversation_id,
-        app_config().local_engine.max_tokens,
+        crate::settings::load_settings().local_engine_max_tokens,
         &mut on_piece,
     )
     .await?;
@@ -682,7 +682,7 @@ async fn generate_with_tools_via_process(
         native_engines::tool_loop::tool_catalog_prompt(tools)
     );
 
-    let max_tool_iterations = app_config().max_tool_iterations;
+    let max_tool_iterations = crate::settings::load_settings().max_tool_iterations;
     for _ in 0..max_tool_iterations {
         let output = process
             .generate(&running_prompt, max_tokens, &mut on_piece)

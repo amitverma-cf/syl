@@ -1,4 +1,5 @@
-pub mod app_config;
+pub mod engine_ids;
+pub mod registry_trust;
 pub mod workspace_paths;
 
 use serde::{Deserialize, Serialize};

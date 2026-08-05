@@ -67,6 +67,7 @@ fn model_calls_read_file_tool_and_uses_its_real_content() {
         &executor,
         "real-tool-calling-test",
         128,
+        8,
         |_piece| {},
     )
     .unwrap();

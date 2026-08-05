@@ -78,7 +78,7 @@ async fn fire_job(app: AppHandle, job: ScheduledJob) {
     let _ = app_state.conversation_store.create_conversation(
         &job.conversation_id,
         &job.name,
-        default_flow_name(),
+        &default_flow_name(),
     );
 
     let result = fire_turn(
@@ -188,7 +188,7 @@ pub async fn add_scheduled_job(
     let conversation_id = Uuid::new_v4().to_string();
     state
         .conversation_store
-        .create_conversation(&conversation_id, &name, default_flow_name())
+        .create_conversation(&conversation_id, &name, &default_flow_name())
         .map_err(|e| e.to_string())?;
 
     let job = ScheduledJob {

@@ -8,10 +8,9 @@ use crate::{
 /// A detached Ed25519 signature (hex) for each manifest file, checked against
 /// a hex-encoded public key before anything else — provenance ("this really
 /// came from the repo owner"), on top of the existing sha256/host-allowlist
-/// checks below, which are integrity, not provenance. Optional today because
-/// no real signing key has been provisioned/wired into a publish pipeline yet
-/// (see `examples/sign_registry.rs`) — once `registryManifestPublicKey` is
-/// set in `config/app.json`, a poll without valid signatures is rejected.
+/// checks below, which are integrity, not provenance. The real key lives at
+/// `syl_core::registry_trust::REGISTRY_MANIFEST_PUBLIC_KEY` (see
+/// `examples/sign_registry.rs` for how it was generated).
 #[derive(Debug, Clone, Copy)]
 pub struct RegistrySignatures<'a> {
     pub public_key_hex: &'a str,
@@ -23,10 +22,10 @@ pub struct RegistrySignatures<'a> {
 /// `models.json` pair into `registry_dir`.
 ///
 /// `allowed_hosts` is the caller-supplied list of hosts a polled entry's
-/// `download_url`/`extra_files` may point at — deliberately not a hardcoded constant
-/// in this crate, so the app can make it a config value (`config/app.json`'s
-/// `registryAllowedHosts`) rather than a code change when a legitimate new source is
-/// added.
+/// `download_url`/`extra_files` may point at — deliberately not a hardcoded
+/// constant in this crate, so a caller can pass its own trust anchor (see
+/// `syl_core::registry_trust::REGISTRY_ALLOWED_HOSTS`) rather than this crate
+/// needing to know about it.
 ///
 /// Every entry across both files is validated before anything is written — one bad
 /// entry rejects the whole poll rather than silently dropping just that entry, since
