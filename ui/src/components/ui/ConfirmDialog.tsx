@@ -8,6 +8,9 @@ export interface ConfirmDialogProps {
   triggerIcon: React.ReactNode;
   label: string;
   className?: string;
+  triggerTestId?: string;
+  confirmTestId?: string;
+  cancelTestId?: string;
 }
 
 /// Inline confirm-in-place interaction: a trigger icon that, once clicked,
@@ -21,13 +24,17 @@ function ConfirmDialog({
   triggerIcon,
   label,
   className = "",
+  triggerTestId,
+  confirmTestId,
+  cancelTestId,
 }: ConfirmDialogProps) {
   if (confirming) {
     return (
-      <span className={`ui-confirm-pair${className ? ` ${className}` : ""}`}>
+      <span className="ui-confirm-pair">
         <button
           type="button"
           className={className}
+          data-testid={confirmTestId}
           aria-label={`Confirm ${label}`}
           onClick={(e) => {
             e.stopPropagation();
@@ -39,6 +46,7 @@ function ConfirmDialog({
         <button
           type="button"
           className={className}
+          data-testid={cancelTestId}
           aria-label={`Cancel ${label}`}
           onClick={(e) => {
             e.stopPropagation();
@@ -55,6 +63,7 @@ function ConfirmDialog({
     <button
       type="button"
       className={className}
+      data-testid={triggerTestId}
       aria-label={label}
       onClick={(e) => {
         e.stopPropagation();

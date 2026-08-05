@@ -407,6 +407,14 @@ body,
   text-overflow: ellipsis;
   white-space: nowrap;
 }
+.conv-delete {
+  background: none;
+  border: none;
+  padding: 0;
+  display: inline-flex;
+  align-items: center;
+  cursor: pointer;
+}
 .conv .conv-delete {
   opacity: 0;
   color: var(--text-3);
